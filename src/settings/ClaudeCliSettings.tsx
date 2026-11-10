@@ -184,8 +184,7 @@ interface ClaudeCliSettingsProps {
 
 /**
  * "Subscription (local CLI)" group of the AI provider settings: Claude Code
- * driven through the user's own login (Beta), plus placeholder rows for
- * Gemini CLI and Codex CLI.
+ * driven through the user's own login (Beta), plus a Gemini CLI placeholder.
  */
 export function ClaudeCliSettings({ selected, active, onSelect }: ClaudeCliSettingsProps) {
   const status = useAgentStore((s) => s.status);
@@ -239,20 +238,17 @@ export function ClaudeCliSettings({ selected, active, onSelect }: ClaudeCliSetti
             <span className="truncate">{ROW_LABEL[state]}</span>
           </span>
         </button>
-        {["Gemini CLI", "Codex CLI"].map((label) => (
-          <button
-            key={label}
-            type="button"
-            disabled
-            className="flex flex-col items-start rounded-xl border border-dashed border-border/40 p-3 text-left opacity-60 cursor-not-allowed"
-          >
-            <div className="flex w-full items-center gap-1.5">
-              <Terminal className="h-3.5 w-3.5 text-muted-foreground/60" />
-              <span className="text-xs font-medium text-muted-foreground">{label}</span>
-            </div>
-            <span className="mt-1.5 text-meta text-muted-foreground/70">Coming soon</span>
-          </button>
-        ))}
+        <button
+          type="button"
+          disabled
+          className="flex flex-col items-start rounded-xl border border-dashed border-border/40 p-3 text-left opacity-60 cursor-not-allowed"
+        >
+          <div className="flex w-full items-center gap-1.5">
+            <Terminal className="h-3.5 w-3.5 text-muted-foreground/60" />
+            <span className="text-xs font-medium text-muted-foreground">Gemini CLI</span>
+          </div>
+          <span className="mt-1.5 text-meta text-muted-foreground/70">Coming soon</span>
+        </button>
       </div>
 
       {selected && (

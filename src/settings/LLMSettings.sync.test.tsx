@@ -22,6 +22,10 @@ const ipc = vi.hoisted(() => ({
   setLLMProvider: vi.fn(),
   setActiveModel: vi.fn(),
   setClaudeCliConfig: vi.fn(),
+  codexCliStatus: vi.fn(),
+  codexCliModels: vi.fn(),
+  testLLMConnection: vi.fn(),
+  listModels: vi.fn(),
 }));
 
 vi.mock("../lib/ipc", async (importOriginal) => ({
@@ -32,9 +36,12 @@ vi.mock("../lib/ipc", async (importOriginal) => ({
   setLLMProvider: (...a: unknown[]) => ipc.setLLMProvider(...a),
   setActiveModel: (...a: unknown[]) => ipc.setActiveModel(...a),
   setClaudeCliConfig: (...a: unknown[]) => ipc.setClaudeCliConfig(...a),
+  codexCliStatus: () => ipc.codexCliStatus(),
+  codexCliModels: (...a: unknown[]) => ipc.codexCliModels(...a),
+  testLLMConnection: (...a: unknown[]) => ipc.testLLMConnection(...a),
   getApiKey: async () => null,
   hasApiKey: async () => false,
-  listModels: async () => [],
+  listModels: (...a: unknown[]) => ipc.listModels(...a),
   listLocalSTTEngines: async () => [],
   getLLMProviders: async () => [],
 }));
@@ -44,6 +51,12 @@ import { ServiceStatusBar } from "../components/ServiceStatusBar";
 import { resetAgentStoreForTests } from "../stores/agentStore";
 import { useStreamStore } from "../stores/streamStore";
 import { DEFAULT_CLAUDE_CLI_CONFIG, useConfigStore } from "../stores/configStore";
+import { DEFAULT_LLM_PROFILES, useModelProfilesStore } from "../stores/modelProfilesStore";
+
+const CODEX_MODELS = [
+  { id: "model-a", name: "Model A", supported_reasoning_efforts: ["low", "medium"], is_default: true },
+  { id: "model-b", name: "Model B", supported_reasoning_efforts: ["low"], is_default: false },
+];
 
 const LOGGED_IN: ClaudeCliStatus = {
   installed: true,
@@ -79,12 +92,73 @@ describe("Settings ↔ footer sync of the active LLM", () => {
     ipc.setLLMProvider.mockReset().mockResolvedValue(undefined);
     ipc.setActiveModel.mockReset().mockResolvedValue(undefined);
     ipc.setClaudeCliConfig.mockReset().mockResolvedValue(undefined);
+    ipc.codexCliStatus.mockReset().mockResolvedValue({ installed: true, authenticated: true, plan: "pro" });
+    ipc.codexCliModels.mockReset().mockResolvedValue(CODEX_MODELS);
+    ipc.testLLMConnection.mockReset().mockResolvedValue(true);
+    ipc.listModels.mockReset().mockImplementation(async (provider: string) => provider.includes("codex_cli") ? CODEX_MODELS : []);
+    useModelProfilesStore.setState({ profiles: structuredClone(DEFAULT_LLM_PROFILES), error: null });
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("selects Codex from the shared grid and restores its applied model and options after switching away", async () => {
+    // Arrange
+    render(<><LLMSettings /><ServiceStatusBar /></>);
+    const providers = screen.getByRole("region", { name: "AI providers" });
+    const codex = within(providers).getByRole("button", { name: /^Codex CLI/ });
+    expect(codex).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: /^Codex CLI/ })).toHaveLength(1);
+    expect(ipc.codexCliStatus).not.toHaveBeenCalled();
+
+    // Act
+    fireEvent.click(codex);
+    await screen.findByText(/Connected with ChatGPT/);
+    expect(screen.getByLabelText("Codex model").closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("Advanced settings"));
+    fireEvent.change(screen.getByLabelText("Codex model"), { target: { value: "model-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set Codex CLI as Active Provider" }));
+    await waitFor(() => expect(screen.getByTitle(/^LLM: Codex \/ model-b$/)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "low" } });
+    fireEvent.change(screen.getByLabelText("Boost / speed"), { target: { value: "priority" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save AI profile" })); });
+    fireEvent.click(within(providers).getByRole("button", { name: /^Ollama/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Set Ollama as Active Provider" }));
+    await waitFor(() => expect(screen.getByTitle(/^LLM: Ollama/)).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle(/^LLM: Ollama/));
+    fireEvent.click(screen.getByRole("button", { name: /^Codex$/ }));
+    await waitFor(() => expect(ipc.listModels).toHaveBeenCalledWith("codex_cli"));
+    fireEvent.click(await screen.findByRole("button", { name: "model-b" }));
+
+    // Assert
+    await waitFor(() => expect(screen.getByTitle(/^LLM: Codex \/ model-b$/)).toBeInTheDocument());
+    await screen.findByText(/Connected with ChatGPT/);
+    expect(codex).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByText("Advanced settings"));
+    expect(screen.getByLabelText("Codex model")).toHaveValue("model-b");
+    expect(screen.getByLabelText("Reasoning")).toHaveValue("low");
+    expect(screen.queryByRole("option", { name: "medium" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Boost / speed")).toHaveValue("priority");
+    expect(ipc.setLLMProvider).toHaveBeenLastCalledWith(JSON.stringify({ provider_type: "codex_cli" }));
+    expect(ipc.setActiveModel).toHaveBeenLastCalledWith("codex_cli", "model-b");
+  });
+
+  it("opens Codex settings from the shared grid with login required before activation", async () => {
+    // Arrange
+    ipc.codexCliStatus.mockResolvedValue({ installed: true, authenticated: false, auth_type: "apiKey" });
+    render(<LLMSettings />);
+
+    // Act
+    fireEvent.click(within(screen.getByRole("region", { name: "AI providers" })).getByRole("button", { name: /^Codex CLI/ }));
+
+    // Assert
+    expect(await screen.findByRole("button", { name: "Open Codex login" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Set Codex CLI as Active Provider" })).toBeDisabled();
+    expect(ipc.codexCliModels).not.toHaveBeenCalled();
+    expect(ipc.setLLMProvider).not.toHaveBeenCalled();
   });
 
   it("the Claude panel in Settings activates Claude, and the footer follows", async () => {

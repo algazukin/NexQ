@@ -5,7 +5,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { showToast } from "../stores/toastStore";
 import {
-  getLLMProviders,
   listModels,
   setActiveModel,
   testLLMConnection,
@@ -29,6 +28,7 @@ import {
   Server,
   Cloud,
   Settings2,
+  Terminal,
   Zap,
 } from "lucide-react";
 
@@ -46,14 +46,12 @@ const PROVIDER_DISPLAY: Record<
   gemini: { label: "Google Gemini", description: "Gemini Pro, Flash", requiresKey: true, isLocal: false },
   openrouter: { label: "OpenRouter", description: "Multi-provider gateway", requiresKey: true, isLocal: false },
   custom: { label: "Custom", description: "Your own endpoint", requiresKey: false, isLocal: false },
-  // Not in ALL_PROVIDERS: it gets its own "Subscription (local CLI)" group.
-  // isLocal is false here because that flag drives the local-server hints below.
-  codex_cli: { label: "Codex (subscription)", description: "Your ChatGPT login via local Codex CLI", requiresKey: false, isLocal: false },
+  codex_cli: { label: "Codex CLI", description: "ChatGPT subscription via local CLI", requiresKey: false, isLocal: false },
   claude_cli: { label: "Claude (subscription)", description: "Your own Claude login (beta)", requiresKey: false, isLocal: false },
 };
 
 const ALL_PROVIDERS: LLMProviderType[] = [
-  "ollama", "lm_studio", "openai", "anthropic", "groq", "gemini", "openrouter", "custom",
+  "ollama", "lm_studio", "openai", "anthropic", "groq", "gemini", "openrouter", "custom", "codex_cli",
 ];
 
 // Filter out known embedding-only models
@@ -327,7 +325,8 @@ export function LLMSettings() {
   const isLocal = info?.isLocal ?? false;
   const isCustom = selectedProvider === "custom";
   const isClaudeCli = selectedProvider === "claude_cli";
-  const isSubscriptionCli = isClaudeCli || selectedProvider === "codex_cli";
+  const isCodexCli = selectedProvider === "codex_cli";
+  const isSubscriptionCli = isClaudeCli || isCodexCli;
   // Claude can be made active once the CLI is found and logged in (or while
   // its login state is unknown); it has no model of its own to pick here.
   const claudeUnusable =
@@ -362,12 +361,10 @@ export function LLMSettings() {
         onSelect={() => handleProviderChange("claude_cli")}
       />
 
-      <CodexCliSettings selected={selectedProvider === "codex_cli"} active={llmProvider === "codex_cli"} onSelect={() => handleProviderChange("codex_cli")} />
-
       {/* Provider Selection */}
-      <div className="rounded-xl border border-border/30 bg-card/50 p-5">
-        <h3 className="mb-3 text-sm font-semibold text-primary/80">API & local providers</h3>
-        <div className="grid grid-cols-4 gap-2.5">
+      <section aria-label="AI providers" className="rounded-xl border border-border/30 bg-card/50 p-5">
+        <h3 className="mb-3 text-sm font-semibold text-primary/80">AI providers</h3>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
           {ALL_PROVIDERS.map((pType) => {
             const display = PROVIDER_DISPLAY[pType];
             const isSelected = selectedProvider === pType;
@@ -399,6 +396,8 @@ export function LLMSettings() {
                     <Server className="h-3.5 w-3.5 text-muted-foreground" />
                   ) : pType === "custom" ? (
                     <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  ) : pType === "codex_cli" ? (
+                    <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
                   ) : (
                     <Cloud className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
@@ -415,7 +414,9 @@ export function LLMSettings() {
             );
           })}
         </div>
-      </div>
+      </section>
+
+      {isCodexCli && <CodexCliSettings active={llmProvider === "codex_cli"} />}
 
       {/* API Key Input (for cloud providers) */}
       {requiresApiKey && (
@@ -576,7 +577,7 @@ export function LLMSettings() {
       )}
 
       {/* Make Active button — only when different from active AND provider is ready */}
-      {selectedProvider !== llmProvider && (
+      {!isCodexCli && selectedProvider !== llmProvider && (
         <button
           disabled={claudeUnusable}
           onClick={async () => {

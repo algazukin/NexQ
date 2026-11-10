@@ -12,7 +12,7 @@ import { useStreamStore } from "../stores/streamStore";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useSpeakerStore } from "../stores/speakerStore";
 import { useAudioLevel } from "../hooks/useAudioLevel";
-import { hasApiKey, listLocalSTTEngines, getApiKey } from "../lib/ipc";
+import { hasApiKey, listLocalSTTEngines, getApiKey, listModels } from "../lib/ipc";
 import type { STTProviderType, LLMProviderType, LocalSTTEngineInfo } from "../lib/types";
 import { showToast } from "../stores/toastStore";
 import { useUpdaterStore } from "../stores/updaterStore";
@@ -970,12 +970,14 @@ function LLMPickerDropdown({
     setModelsLoading(true);
     (async () => {
       try {
-        const { listModels } = await import("../lib/ipc");
-        const key = await getApiKey(pendingProvider).catch(() => null);
-        const config = JSON.stringify({
-          provider_type: pendingProvider,
-          ...(key && { api_key: key }),
-        });
+        let config = pendingProvider;
+        if (pendingProvider !== "codex_cli") {
+          const key = await getApiKey(pendingProvider).catch(() => null);
+          config = JSON.stringify({
+            provider_type: pendingProvider,
+            ...(key && { api_key: key }),
+          });
+        }
         const modelList = await listModels(config);
         if (cancelled) return;
         const chatModels = modelList.filter(

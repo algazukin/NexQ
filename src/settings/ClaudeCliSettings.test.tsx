@@ -264,12 +264,14 @@ describe("ClaudeCliSettings", () => {
     expect(screen.queryByText(/applies to the next session/i)).not.toBeInTheDocument();
   });
 
-  it("lists Gemini CLI and Codex CLI as disabled, coming soon", async () => {
+  it("keeps the Gemini CLI placeholder in the subscription panel", async () => {
+    // Arrange
     renderSettings();
+    // Act
     await screen.findByText(/me@example\.com/);
+    // Assert
     expect(screen.getByRole("button", { name: /gemini cli/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /codex cli/i })).toBeDisabled();
-    expect(screen.getAllByText("Coming soon")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /codex cli/i })).not.toBeInTheDocument();
   });
 
   it("renders the Beta badge and the credentials note", async () => {

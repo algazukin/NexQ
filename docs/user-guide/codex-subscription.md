@@ -5,9 +5,9 @@ NexQ can use the official local Codex CLI directly, with the ChatGPT account alr
 ## Connect Codex
 
 1. Install Codex CLI and run `codex login`, choosing ChatGPT sign-in. An API-key login has separate billing and is not shown as a connected subscription.
-2. Open Settings > AI and select **Codex · Subscription (local CLI)**.
-3. Click **Check Codex connection**, select a model from the account catalog, then **Use Codex**. NexQ warms the active connection without generating an answer.
-4. Set reasoning and boost under **Main AI reasoning and boost**, then **Save AI profile**. Codex reasoning choices come from its model catalog. Fast/Boost is an explicit speed-tier request and may use included limits or paid credit faster; Standard explicitly requests normal speed. Provider default preserves the provider choice.
+2. Open **Settings → LLM Providers** and select **Codex CLI** in the **AI providers** list.
+3. Check the login status and click **Set Codex CLI as Active Provider**. NexQ uses the saved model or the catalog default and warms the connection. To choose a different model, open **Advanced settings**.
+4. In **Advanced settings**, set reasoning and Boost, then click **Save AI profile**. Available reasoning levels come from the model catalog. Fast/Boost requests the priority tier and may use included limits or paid credit faster. Standard requests normal speed. Provider default leaves the choice to Codex.
 
 Changing the model or profile affects later requests. The signed-in account determines model availability and speed-tier eligibility. An unsupported tier or model returns a provider error; NexQ does not promise that every account receives accelerated processing.
 
