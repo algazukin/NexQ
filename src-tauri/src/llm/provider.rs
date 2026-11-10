@@ -9,10 +9,12 @@ use tokio::sync::Notify;
 
 /// Per-request generation parameters.
 /// `None` fields mean "use provider default" — they won't be sent in the HTTP body.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GenerationParams {
     pub temperature: Option<f64>,
     pub max_tokens: Option<u64>,
+    #[serde(default)]
+    pub model_options: Option<super::profiles::ModelOptions>,
     /// Gemini context cache name (e.g. "cachedContents/abc123").
     /// When set, GeminiClient uses the cached content instead of re-sending documents.
     /// Ignored by all other providers.
@@ -27,6 +29,9 @@ pub struct GenerationParams {
     /// When true, tokens go only to the caller's `TokenSink` and no `llm_stream_*`
     /// event is emitted (used by internal callers such as LLM translation).
     pub silent: bool,
+    /// Transient image data URLs. Never persisted in generation settings or stream metadata.
+    #[serde(skip)]
+    pub images: Vec<String>,
     /// Awaitable cancel token. Providers race their network awaits against it (see
     /// `cancellable`) and check it before emitting each token, returning
     /// `LLMError::Cancelled` once it fires. Never serialized.
@@ -34,15 +39,34 @@ pub struct GenerationParams {
     pub cancel: Option<Arc<CancelToken>>,
 }
 
+impl std::fmt::Debug for GenerationParams {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GenerationParams")
+            .field("temperature", &self.temperature)
+            .field("max_tokens", &self.max_tokens)
+            .field("model_options", &self.model_options)
+            .field("cache_name", &self.cache_name)
+            .field("enable_web_search", &self.enable_web_search)
+            .field("request_id", &self.request_id)
+            .field("silent", &self.silent)
+            .field("image_count", &self.images.len())
+            .field("cancel", &self.cancel)
+            .finish()
+    }
+}
+
 impl Default for GenerationParams {
     fn default() -> Self {
         Self {
             temperature: None,
             max_tokens: None,
+            model_options: None,
             cache_name: None,
             enable_web_search: false,
             request_id: None,
             silent: false,
+            images: Vec::new(),
             cancel: None,
         }
     }
@@ -422,6 +446,11 @@ pub trait LLMProvider: Send + Sync {
     /// Returns the name of this provider (e.g., "openai", "ollama")
     fn provider_name(&self) -> &str;
 
+    /// Whether this provider accepts OpenAI-compatible image input.
+    fn supports_images(&self) -> bool {
+        false
+    }
+
     /// Lists available models for this provider
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LLMError>;
 
@@ -614,5 +643,25 @@ mod tests {
         };
         assert_eq!(cancellable(&params, async { 7 }).await.unwrap(), 7);
         assert_eq!(cancellable(&GenerationParams::default(), async { 8 }).await.unwrap(), 8);
+    }
+
+    #[test]
+    fn images_are_excluded_from_settings_and_debug_output() {
+        // Arrange
+        let params = GenerationParams {
+            images: vec!["data:image/png;base64,private-screen".into()],
+            ..Default::default()
+        };
+
+        // Act
+        let settings = serde_json::to_value(&params).unwrap();
+        let debug = format!("{params:?}");
+        let restored: GenerationParams = serde_json::from_value(settings.clone()).unwrap();
+
+        // Assert
+        assert!(settings.get("images").is_none());
+        assert!(restored.images.is_empty());
+        assert!(!debug.contains("private-screen"));
+        assert!(!debug.contains("data:image"));
     }
 }

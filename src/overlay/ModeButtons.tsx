@@ -1,3 +1,4 @@
+import { ScreenTaskButtons } from "../screen/ScreenTaskControls";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStreamStore } from "../stores/streamStore";
 import { useAIActionsStore } from "../stores/aiActionsStore";
@@ -154,6 +155,7 @@ export function ModeButtons() {
           );
         })}
         <ContextScopePicker />
+        <ScreenTaskButtons />
       </div>
 
       {/* Inline Ask input */}

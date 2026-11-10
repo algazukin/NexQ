@@ -27,9 +27,14 @@ describe("acceleratorFromEvent", () => {
   });
 
   it("rejects lone modifiers, plain keys and unsupported keys", () => {
+    // Arrange
+    const unsupported = press({ ctrlKey: true, key: "Backspace", code: "Backspace" });
+    // Act
+    const result = acceleratorFromEvent(unsupported, false);
+    // Assert
     expect(acceleratorFromEvent(press({ ctrlKey: true, key: "Control", code: "ControlLeft" }), false)).toBeNull();
     expect(acceleratorFromEvent(press({ shiftKey: true }), false)).toBeNull();
-    expect(acceleratorFromEvent(press({ ctrlKey: true, key: "Enter", code: "Enter" }), false)).toBeNull();
+    expect(result).toBeNull();
   });
 });
 

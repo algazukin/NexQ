@@ -595,3 +595,11 @@ select option {
 .toggle-switch[data-checked="false"] {
   @apply bg-muted;
 }
+
+
+/* Review comments stay beside their source line without leaving a narrow card. */
+.code-review pre,
+.code-review pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

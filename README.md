@@ -68,6 +68,7 @@ Live two-party transcription, instant AI answers grounded in your own documents,
 
 **AI copilot**
 - Streaming Assist, What to Say, Shorten, Follow-Up, Recap and free-form Ask
+- [Screen tasks](docs/user-guide/screen-tasks.md) (Windows): select a problem on screen and stream its solution through your image-capable HTTP provider
 - Automatic question detection and one-key AI actions
 - Interview, lecture, oral-exam, webinar and team-meeting scenarios with editable prompts
 - AI Call Log: inspect every prompt, latency and token count

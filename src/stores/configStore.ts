@@ -83,6 +83,8 @@ function pushClaudeCliConfig(config: ClaudeCliConfig): void {
 }
 
 const DEFAULT_HOTKEYS: HotkeyConfig = {
+  hint_now: "CmdOrCtrl+Alt+Space",
+  hint_details: "CmdOrCtrl+Alt+Enter",
   toggle_assist: "Space",
   start_end_meeting: "Ctrl+M",
   show_hide: "Ctrl+B",
@@ -132,7 +134,7 @@ async function storedProviderConfig(provider: LLMProviderType): Promise<string> 
       const token = await getApiKey("custom").catch(() => null);
       if (token) config.auth_value = token;
     }
-  } else if (provider !== "claude_cli") {
+  } else if (provider !== "claude_cli" && provider !== "codex_cli") {
     const key = await getApiKey(provider).catch(() => null);
     if (key) config.api_key = key;
   }
@@ -238,6 +240,7 @@ interface ConfigState {
 
   // Intelligence
   autoTrigger: boolean;
+  hintsEnabled: boolean;
   autoSummary: boolean;
   contextWindowSeconds: number;
 
@@ -357,6 +360,7 @@ interface ConfigState {
   setGroqConfig: (config: GroqConfig) => void;
   setPauseThresholdMs: (ms: number) => void;
   setAutoTrigger: (enabled: boolean) => void;
+  setHintsEnabled: (enabled: boolean) => void;
   setAutoSummary: (enabled: boolean) => void;
   setContextWindowSeconds: (seconds: number) => void;
   setStartOnLogin: (enabled: boolean) => void;
@@ -439,6 +443,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   groqConfig: DEFAULT_GROQ_CONFIG,
   pauseThresholdMs: 3000,
   autoTrigger: true,
+  hintsEnabled: true,
   autoSummary: true,
   contextWindowSeconds: 120,
   startOnLogin: false,
@@ -528,19 +533,31 @@ export const useConfigStore = create<ConfigState>((set) => ({
   activateLLMProvider: async (provider, options = {}) => {
     const ipc = await import("../lib/ipc");
     const before = useConfigStore.getState();
+    const codexCatalog = provider === "codex_cli" ? await ipc.codexCliModels() : [];
+    const requestedCodexModel = options.model || before.lastModelByProvider.codex_cli;
+    const codexModel = requestedCodexModel
+      ? codexCatalog.find((model) => model.id === requestedCodexModel)
+      : codexCatalog.find((model) => model.is_default) ?? codexCatalog[0];
+    if (provider === "codex_cli" && !codexModel) {
+      throw new Error("The selected Codex model is unavailable. Refresh the Codex model list.");
+    }
     let providerConfig = options.providerConfig;
-    if (providerConfig == null) providerConfig = await storedProviderConfig(provider);
+    if (providerConfig == null) {
+      providerConfig = await storedProviderConfig(provider);
+    }
     await ipc.setLLMProvider(providerConfig);
     before.setLLMProvider(provider);
     // An activated provider counts as verified (the "Ready" badge in Settings).
     const verified = useConfigStore.getState().verifiedCloudProviders;
-    if (!verified.includes(provider)) useConfigStore.getState().setVerifiedCloudProviders([...verified, provider]);
+    if (!verified.includes(provider)) {
+      useConfigStore.getState().setVerifiedCloudProviders([...verified, provider]);
+    }
     // Claude ignores the model (Fast / Deep come from its settings) but the
     // backend needs one: its Fast model fills the slot.
     const model =
       provider === "claude_cli"
         ? useConfigStore.getState().claudeCliConfig.fast_model
-        : options.model || before.lastModelByProvider[provider] || "";
+        : codexModel?.id ?? (options.model || before.lastModelByProvider[provider] || "");
     // Without a model, Claude's Fast model must not carry over to the new provider.
     if (model || before.llmProvider === "claude_cli") {
       try {
@@ -550,6 +567,13 @@ export const useConfigStore = create<ConfigState>((set) => ({
         throw new Error(`model ${model || "(none)"} not applied: ${e instanceof Error ? e.message : String(e)}`);
       }
       useConfigStore.getState().setLLMModel(model, provider);
+    }
+    if (codexModel) {
+      const { useModelProfilesStore } = await import("./modelProfilesStore");
+      const profiles = useModelProfilesStore.getState().profiles;
+      if (profiles.main.reasoning_effort && !codexModel.supported_reasoning_efforts.includes(profiles.main.reasoning_effort)) {
+        await useModelProfilesStore.getState().setProfiles({ ...profiles, main: { ...profiles.main, reasoning_effort: null } });
+      }
     }
   },
   rememberModel: (provider, model) => {
@@ -750,6 +774,10 @@ export const useConfigStore = create<ConfigState>((set) => ({
         .catch((e) => console.warn("[configStore] Failed to update pause threshold:", e))
     );
   },
+  setHintsEnabled: (enabled) => {
+    set({ hintsEnabled: enabled });
+    persistValue("hintsEnabled", enabled);
+  },
   setAutoTrigger: (enabled) => {
     set({ autoTrigger: enabled });
     persistValue("autoTrigger", enabled);
@@ -943,6 +971,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
       const meetingAudioConfig = await store.get<MeetingAudioConfig>("meetingAudioConfig");
       const customPresets = await store.get<MeetingAudioConfig[]>("customPresets");
       const autoTrigger = await store.get<boolean>("autoTrigger");
+      const hintsEnabled = await store.get<boolean>("hintsEnabled");
       const autoSummary = await store.get<boolean>("autoSummary");
       const contextWindowSeconds = await store.get<number>("contextWindowSeconds");
       const startOnLogin = await store.get<boolean>("startOnLogin");
@@ -1121,12 +1150,13 @@ export const useConfigStore = create<ConfigState>((set) => ({
         ...(resolvedMeetingConfig != null && { meetingAudioConfig: resolvedMeetingConfig }),
         ...(customPresets != null && { customPresets }),
         ...(autoTrigger != null && { autoTrigger }),
+        ...(hintsEnabled != null && { hintsEnabled }),
         ...(autoSummary != null && { autoSummary }),
         ...(contextWindowSeconds != null && { contextWindowSeconds }),
         ...(startOnLogin != null && { startOnLogin }),
         ...(dataDirectory != null && { dataDirectory }),
         ...(firstRunCompleted != null && { firstRunCompleted }),
-        ...(hotkeys != null && { hotkeys }),
+        ...(hotkeys != null && { hotkeys: { ...DEFAULT_HOTKEYS, ...hotkeys } }),
         ...(activeWhisperModel !== undefined && { activeWhisperModel }),
         ...(activeModelPerEngine != null && { activeModelPerEngine }),
         ...(whisperDualPass != null && { whisperDualPass }),
@@ -1247,6 +1277,16 @@ export const useConfigStore = create<ConfigState>((set) => ({
       });
       store.onKeyChange<boolean>("stealthMode", (val) => {
         if (val != null) set({ stealthMode: val });
+      });
+      store.onKeyChange<HotkeyConfig>("hotkeys", (value) => {
+        if (value) {
+          set({ hotkeys: { ...DEFAULT_HOTKEYS, ...value } });
+        }
+      });
+      store.onKeyChange<boolean>("hintsEnabled", (value) => {
+        if (typeof value === "boolean") {
+          set({ hintsEnabled: value });
+        }
       });
       store.onKeyChange<string>("stealthShortcut", (val) => {
         if (val != null) set({ stealthShortcut: val });

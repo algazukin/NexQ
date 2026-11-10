@@ -114,6 +114,14 @@ export function getModeLabel(mode: IntelligenceMode): string {
       return "Bookmarks";
     case "MeetingAsk":
       return "Ask meeting";
+    case "Hint":
+      return "Подсказка";
+    case "HintDetails":
+      return "Подробнее";
+    case "CodeReview":
+      return "Code Review";
+    case "ScreenTask":
+      return "Screen task";
   }
 }
 
@@ -140,6 +148,14 @@ export function getModeShortcut(mode: IntelligenceMode): string {
       return "";
     case "MeetingAsk":
       return "";
+    case "Hint":
+      return "Ctrl+Alt+Space";
+    case "HintDetails":
+      return "Ctrl+Alt+Enter";
+    case "CodeReview":
+      return "";
+    case "ScreenTask":
+      return "Ctrl+Alt+S";
   }
 }
 

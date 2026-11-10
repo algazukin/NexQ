@@ -17,6 +17,10 @@ const MODE_COLORS: Record<
   IntelligenceMode,
   { badge: string; dot: string }
 > = {
+  Hint: { badge: "bg-info/20 text-info", dot: "bg-info" },
+  HintDetails: { badge: "bg-primary/20 text-primary", dot: "bg-primary" },
+  CodeReview: { badge: "bg-warning/20 text-warning", dot: "bg-warning" },
+  ScreenTask: { badge: "bg-primary/20 text-primary", dot: "bg-primary" },
   Assist: { badge: "bg-info/20 text-info", dot: "bg-info" },
   WhatToSay: {
     badge: "bg-primary/20 text-primary",

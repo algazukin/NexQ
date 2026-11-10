@@ -140,6 +140,7 @@ pub struct TranslationCache {
     map: HashMap<(u64, String), CacheEntry>,
     order: Vec<(u64, String)>,
     max_size: usize,
+    generation: u64,
 }
 
 impl TranslationCache {
@@ -148,7 +149,18 @@ impl TranslationCache {
             map: HashMap::new(),
             order: Vec::new(),
             max_size,
+            generation: 0,
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     fn text_hash(text: &str) -> u64 {
@@ -359,5 +371,23 @@ impl TranslationRouter {
             chunks.push(current);
         }
         chunks
+    }
+}
+
+#[cfg(test)]
+mod profile_cache_tests {
+    use super::TranslationCache;
+
+    #[test]
+    fn profile_change_invalidates_values_and_identifies_older_in_flight_requests() {
+        // Arrange
+        let mut cache = TranslationCache::new(10);
+        cache.insert("input", "ru", "old model result".into());
+        let old_generation = cache.generation();
+        // Act
+        cache.clear();
+        // Assert
+        assert!(cache.get("input", "ru").is_none());
+        assert_ne!(old_generation, cache.generation());
     }
 }

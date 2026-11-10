@@ -18,6 +18,7 @@ export type StreamPhase = "idle" | "sending" | "waiting" | "thinking" | "writing
 
 /** What the start event told us about the current request. */
 export interface StreamMeta {
+  requestId: string | null;
   model: string;
   provider: string;
   /** The user's transcript scope ("Last 5 min"), null for the action default. */
@@ -29,7 +30,7 @@ export interface StreamMeta {
 }
 
 /** Optional start-event details for `startStream`. */
-export interface StreamStartDetails extends Partial<Omit<StreamMeta, "model" | "provider">> {
+export interface StreamStartDetails extends Partial<Omit<StreamMeta, "model" | "provider" | "requestId">> {
   requestId?: string | null;
 }
 
@@ -173,6 +174,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       pendingRequestId: null,
       currentId: null,
       streamMeta: {
+        requestId: details.requestId ?? null,
         model,
         provider,
         scopeLabel: details.scopeLabel ?? null,

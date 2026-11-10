@@ -1,13 +1,16 @@
 pub mod anthropic;
 pub mod cli_agent;
 pub mod custom;
+pub mod codex;
 pub mod gemini;
 pub mod gemini_cache;
 pub mod ollama;
 pub mod openai_compat;
 pub mod openrouter_models;
 pub mod provider;
+pub mod profiles;
 pub mod stream_parser;
+pub(crate) mod vision;
 
 use provider::{LLMError, LLMProvider};
 use serde::{Deserialize, Serialize};
@@ -28,6 +31,7 @@ pub enum ProviderType {
     Custom,
     /// The local Claude Code CLI on the user's own subscription login.
     ClaudeCli,
+    CodexCli,
 }
 
 impl ProviderType {
@@ -42,6 +46,7 @@ impl ProviderType {
             "openrouter" => Ok(Self::Openrouter),
             "custom" => Ok(Self::Custom),
             "claude_cli" => Ok(Self::ClaudeCli),
+            "codex_cli" => Ok(Self::CodexCli),
             _ => Err(LLMError::NotConfigured(format!(
                 "Unknown provider type: {}",
                 s
@@ -60,6 +65,7 @@ impl ProviderType {
             Self::Openrouter => "openrouter",
             Self::Custom => "custom",
             Self::ClaudeCli => "claude_cli",
+            Self::CodexCli => "codex_cli",
         }
     }
 
@@ -74,6 +80,7 @@ impl ProviderType {
             Self::Openrouter => "OpenRouter",
             Self::Custom => "Custom",
             Self::ClaudeCli => "Claude (subscription)",
+            Self::CodexCli => "Codex (subscription)",
         }
     }
 
@@ -86,7 +93,7 @@ impl ProviderType {
             Self::Groq => "https://api.groq.com/openai/v1",
             Self::Gemini => "https://generativelanguage.googleapis.com",
             Self::Openrouter => "https://openrouter.ai/api/v1",
-            Self::Custom | Self::ClaudeCli => "",
+            Self::Custom | Self::ClaudeCli | Self::CodexCli => "",
         }
     }
 
@@ -98,7 +105,7 @@ impl ProviderType {
     }
 
     pub fn is_local(&self) -> bool {
-        matches!(self, Self::Ollama | Self::LmStudio | Self::ClaudeCli)
+        matches!(self, Self::Ollama | Self::LmStudio | Self::ClaudeCli | Self::CodexCli)
     }
 }
 
@@ -196,6 +203,7 @@ pub fn create_provider(config: &ProviderConfig) -> Result<Box<dyn LLMProvider>, 
         // Needs no config: it reaches the session manager through the
         // `AppHandle` passed to every `stream_completion` call.
         ProviderType::ClaudeCli => Box::new(cli_agent::provider::ClaudeCliProvider::new()),
+        ProviderType::CodexCli => Box::new(codex::CodexCliProvider::new()),
     };
 
     Ok(provider)
@@ -205,6 +213,9 @@ pub fn create_provider(config: &ProviderConfig) -> Result<Box<dyn LLMProvider>, 
 pub struct LLMRouter {
     active_provider: Option<Arc<TokioMutex<Box<dyn LLMProvider>>>>,
     active_model: String,
+    active_config: Option<ProviderConfig>,
+    translation_provider: Option<Arc<TokioMutex<Box<dyn LLMProvider>>>>,
+    pub profiles: profiles::LlmProfiles,
     active_provider_type: Option<ProviderType>,
     cancel_token: Arc<TokioMutex<bool>>,
 }
@@ -214,6 +225,9 @@ impl LLMRouter {
         Self {
             active_provider: None,
             active_model: String::new(),
+            active_config: None,
+            translation_provider: None,
+            profiles: profiles::LlmProfiles::default(),
             active_provider_type: None,
             cancel_token: Arc::new(TokioMutex::new(false)),
         }
@@ -229,6 +243,8 @@ impl LLMRouter {
 
         self.active_provider = Some(Arc::new(TokioMutex::new(provider)));
         self.active_provider_type = Some(provider_type);
+        self.active_config = Some(config);
+        self.translation_provider = None;
         Ok(())
     }
 
@@ -237,6 +253,17 @@ impl LLMRouter {
         self.active_provider
             .clone()
             .ok_or_else(|| LLMError::NotConfigured("No LLM provider configured".to_string()))
+    }
+
+    /// Independent connection pool/process: translation never owns the live client lock.
+    pub fn translation_provider(&mut self) -> Result<Arc<TokioMutex<Box<dyn LLMProvider>>>, LLMError> {
+        if let Some(provider) = self.translation_provider.as_ref() {
+            return Ok(provider.clone());
+        }
+        let config = self.active_config.as_ref().ok_or_else(|| LLMError::NotConfigured("No LLM provider configured".into()))?;
+        let provider = Arc::new(TokioMutex::new(create_provider(config).map_err(LLMError::NotConfigured)?));
+        self.translation_provider = Some(provider.clone());
+        Ok(provider)
     }
 
     /// Get the active model name.
@@ -282,6 +309,7 @@ impl LLMRouter {
             ProviderType::Openrouter,
             ProviderType::Custom,
             ProviderType::ClaudeCli,
+            ProviderType::CodexCli,
         ];
 
         all_types
@@ -324,6 +352,25 @@ mod tests {
         let err = create_provider(&cfg("custom", None, None)).err();
         assert!(err.is_some(), "custom without base_url must fail");
         assert_eq!(router.active_provider_type(), Some(&ProviderType::Ollama));
+    }
+
+    #[test]
+    fn translation_client_is_independent_reused_and_does_not_change_main_model() {
+        // Arrange
+        let mut router = LLMRouter::new();
+        router.set_provider(cfg("ollama", None, None)).unwrap();
+        router.set_active_model("main-model".into());
+        let main = router.get_provider().unwrap();
+        // Act
+        let translation = router.translation_provider().unwrap();
+        let same = router.translation_provider().unwrap();
+        router.set_provider(cfg("ollama", None, None)).unwrap();
+        let after_switch = router.translation_provider().unwrap();
+        // Assert
+        assert!(!Arc::ptr_eq(&main, &translation));
+        assert!(Arc::ptr_eq(&same, &translation));
+        assert!(!Arc::ptr_eq(&after_switch, &translation));
+        assert_eq!(router.active_model(), "main-model");
     }
 
     #[test]

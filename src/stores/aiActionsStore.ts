@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import defaultInterviewInstructions from "../lib/defaultInterviewInstructions.txt?raw";
 import { load, Store } from "@tauri-apps/plugin-store";
 import type {
   ActionConfig,
@@ -12,6 +13,7 @@ const STORE_FILE = "config.json";
 const STORE_KEY = "ai_action_configs";
 
 let storeInstance: Store | null = null;
+let watchingConfigs = false;
 
 async function getStore(): Promise<Store> {
   if (!storeInstance) {
@@ -62,7 +64,7 @@ function createDefaultConfigs(): AllActionConfigs {
       temperature: 0.3,
       autoTrigger: true,
     },
-    customInstructions: "",
+    customInstructions: defaultInterviewInstructions,
     instructionPresets: { tone: null, format: null, length: null, opinion: null },
     actions: {
       Assist: {
@@ -177,6 +179,20 @@ export const useAIActionsStore = create<AIActionsState>((set, get) => ({
   loadConfigs: async () => {
     try {
       const store = await getStore();
+      if (!watchingConfigs) {
+        watchingConfigs = true;
+        try {
+          await store.onKeyChange<AllActionConfigs>(STORE_KEY, (value) => {
+            if (value) {
+              const defaults = createDefaultConfigs();
+              set({ configs: { ...defaults, ...value, actions: { ...defaults.actions, ...value.actions } } });
+            }
+          });
+        } catch (error) {
+          watchingConfigs = false;
+          console.warn("[aiActionsStore] Cross-window settings sync unavailable:", error);
+        }
+      }
       const saved = await store.get<AllActionConfigs>(STORE_KEY);
       if (saved) {
         // Merge saved configs with defaults to handle new built-in actions

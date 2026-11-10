@@ -31,7 +31,7 @@ interface ScenarioState {
 
   // Actions
   setActiveScenario: (id: AIScenario) => void;
-  getActiveTemplate: () => ScenarioTemplate;
+  getTemplate: (id: AIScenario) => ScenarioTemplate;
   updatePrompt: (
     scenarioId: string,
     field: keyof Pick<ScenarioTemplate, "system_prompt" | "summary_prompt" | "question_detection_prompt">,
@@ -56,24 +56,20 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     persistValue("activeScenarioId", id);
   },
 
-  getActiveTemplate: () => {
-    const { activeScenarioId, customScenarios, scenarioOverrides } = get();
+  getTemplate: (id) => {
+    const { customScenarios, scenarioOverrides } = get();
+    const custom = customScenarios.find((scenario) => scenario.id === id);
+    if (custom) {
+      return custom;
+    }
 
-    // Check custom scenarios first
-    const custom = customScenarios.find((s) => s.id === activeScenarioId);
-    if (custom) return custom;
-
-    // Fall back to built-in merged with overrides
-    const builtIn = getScenarioById(activeScenarioId);
+    const builtIn = getScenarioById(id);
     if (!builtIn) {
-      // Fallback to team_meeting if active scenario not found
       return BUILT_IN_SCENARIOS[0];
     }
 
-    const overrides = scenarioOverrides[activeScenarioId];
-    if (!overrides) return builtIn;
-
-    return { ...builtIn, ...overrides };
+    const overrides = scenarioOverrides[id];
+    return overrides ? { ...builtIn, ...overrides } : builtIn;
   },
 
   updatePrompt: (scenarioId, field, value) => {

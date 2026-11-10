@@ -32,7 +32,7 @@ export function mergeConsecutiveSegments(segments: TranscriptSegment[]): MergedS
     // A line still growing (interim words pending) stays on its own.
     const growing = current.pending_text !== undefined || seg.pending_text !== undefined;
 
-    if (sameKey && gap <= MERGE_GAP_MS && !wouldExceedLength && seg.is_final && !growing) {
+    if (sameKey && gap <= MERGE_GAP_MS && !wouldExceedLength && current.is_final && seg.is_final && !growing) {
       current = {
         ...current,
         text: current.text + " " + seg.text.trim(),

@@ -140,9 +140,10 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
 
   startMeetingFlow: async (title?: string, audioMode?: AudioMode, scenario?: AIScenario) => {
     try {
-      // Resolve mode and scenario (fall back to current state if not provided)
-      const resolvedMode: AudioMode = audioMode ?? get().audioMode;
-      const resolvedScenario: AIScenario = scenario ?? get().aiScenario;
+      // Starts without a setup dialog use the same saved choices.
+      const rememberedSetup = useConfigStore.getState().rememberedMeetingSetup;
+      const resolvedMode = audioMode ?? rememberedSetup?.audioMode ?? get().audioMode;
+      const resolvedScenario = scenario ?? rememberedSetup?.scenario ?? get().aiScenario;
 
       // 0. Set active scenario in scenarioStore + push prompts to Rust backend.
       // Before start_meeting: a Claude CLI live session starts there with the
@@ -152,7 +153,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
         useScenarioStore.getState().setActiveScenario(resolvedScenario);
 
         // Push scenario prompts to Rust backend for scenario-aware intelligence
-        const template = useScenarioStore.getState().getActiveTemplate();
+        const template = useScenarioStore.getState().getTemplate(resolvedScenario);
         const { setActiveScenario } = await import("../lib/ipc");
         await setActiveScenario(
           template.system_prompt,
@@ -171,7 +172,11 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       }
 
       // 1. Create meeting record in SQLite
-      const meeting = await ipcStartMeeting(title);
+      const meeting = {
+        ...(await ipcStartMeeting(title)),
+        audio_mode: resolvedMode,
+        ai_scenario: resolvedScenario,
+      };
 
       // 1b. Store mode/scenario in state and persist to DB
       set({ audioMode: resolvedMode, aiScenario: resolvedScenario });

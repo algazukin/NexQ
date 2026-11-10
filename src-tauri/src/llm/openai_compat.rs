@@ -56,6 +56,10 @@ impl LLMProvider for OpenAICompatClient {
         &self.config.provider_name
     }
 
+    fn supports_images(&self) -> bool {
+        true
+    }
+
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LLMError> {
         let url = format!("{}/models", self.config.base_url);
         let request = self.apply_auth(self.client.get(&url));
@@ -136,15 +140,10 @@ impl LLMProvider for OpenAICompatClient {
         let start = Instant::now();
 
         // Build messages array
-        let msgs: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| {
-                json!({
-                    "role": m.role,
-                    "content": m.content
-                })
-            })
-            .collect();
+        let msgs = super::vision::openai_messages(&messages, &params.images).map_err(|error| {
+            emit_error(&app_handle, &params, &error.to_string());
+            error
+        })?;
 
         // OpenRouter: ":online" suffix enables web search grounding (via Exa) for any model.
         let model_id = if params.enable_web_search && self.config.provider_name == "openrouter" {
@@ -159,6 +158,9 @@ impl LLMProvider for OpenAICompatClient {
             "stream": true
         });
 
+        if self.config.provider_name == "openai" {
+            super::profiles::apply_http_options(&mut body, &super::profiles::request_options(&app_handle, &params));
+        }
         if let Some(temp) = params.temperature {
             body["temperature"] = json!(temp);
         }
@@ -184,8 +186,13 @@ impl LLMProvider for OpenAICompatClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            let err_msg = format!("Completion request failed ({}): {}", status, body);
+            // Image endpoints may echo the request, including the captured screen.
+            let err_msg = if params.images.is_empty() {
+                let body = cancellable(&params, response.text()).await?.unwrap_or_default();
+                format!("Completion request failed ({}): {}", status, body)
+            } else {
+                format!("Image completion request failed ({})", status)
+            };
             check_cancelled(&params)?;
             emit_error(&app_handle, &params, &err_msg);
             return Err(LLMError::ProviderError(err_msg));

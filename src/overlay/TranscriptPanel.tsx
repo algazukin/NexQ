@@ -119,11 +119,10 @@ export function TranscriptPanel() {
     }
   }, [autoScroll, setAutoScroll]);
 
-  // Merge consecutive same-speaker finals, keep interims separate at the end
+  // Mic and system audio arrive independently. Group lines in spoken order.
   const mergedSegments = useMemo(() => {
-    const finals = segments.filter((s) => s.is_final);
-    const interims = segments.filter((s) => !s.is_final);
-    return [...mergeConsecutiveSegments(finals), ...interims];
+    const ordered = [...segments].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    return mergeConsecutiveSegments(ordered);
   }, [segments]);
 
   // Filter merged segments by search query

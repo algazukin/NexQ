@@ -8,6 +8,7 @@ import { NEXQ_VERSION, NEXQ_BUILD_DATE, NEXQ_DEVELOPER } from "../lib/version";
 import { useEffect } from "react";
 import { useUpdaterStore } from "../stores/updaterStore";
 import {
+  UPDATES_ENABLED,
   checkForUpdates,
   downloadUpdateNow,
   hydrateUpdater,
@@ -66,7 +67,12 @@ export function AboutSettings() {
     onClick: () => checkForUpdates({ manual: true }),
   };
 
-  if (phase === "checking") {
+  if (!UPDATES_ENABLED) {
+    dotClass = "bg-muted-foreground";
+    title = "Local fork — manual updates";
+    detail = "Install a new fork build manually to keep your custom features.";
+    action = null;
+  } else if (phase === "checking") {
     dotClass = "animate-pulse bg-warning";
     title = "Checking for updates…";
     detail = "Connecting to GitHub";
@@ -94,7 +100,7 @@ export function AboutSettings() {
   }
 
   const canSkip =
-    !!version && phase !== "checking" && phase !== "downloading" && skippedVersion !== version;
+    UPDATES_ENABLED && !!version && phase !== "checking" && phase !== "downloading" && skippedVersion !== version;
 
   return (
     <div className="space-y-6">
@@ -190,21 +196,24 @@ export function AboutSettings() {
           <div>
             <label className="text-sm font-medium text-foreground">Automatic updates</label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Download in the background and install when you quit
+              {UPDATES_ENABLED
+                ? "Download in the background and install when you quit"
+                : "Disabled for this local fork to preserve custom features"}
             </p>
           </div>
           <button
             onClick={() => setAutoUpdate(!autoUpdate)}
             role="switch"
-            aria-checked={autoUpdate}
+            disabled={!UPDATES_ENABLED}
+            aria-checked={UPDATES_ENABLED && autoUpdate}
             aria-label="Toggle automatic updates"
-            className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-all duration-200 ${
-              autoUpdate ? "bg-primary shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]" : "bg-muted"
+            className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+              UPDATES_ENABLED && autoUpdate ? "bg-primary shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]" : "bg-muted"
             }`}
           >
             <span
               className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-all duration-200 ${
-                autoUpdate ? "translate-x-5 scale-[1.05]" : "translate-x-0"
+                UPDATES_ENABLED && autoUpdate ? "translate-x-5 scale-[1.05]" : "translate-x-0"
               }`}
             />
           </button>

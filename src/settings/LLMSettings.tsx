@@ -1,3 +1,6 @@
+import { CodexCliSettings } from "./CodexCliSettings";
+import { MainModelProfileSettings } from "./MainModelProfileSettings";
+import { OPTION_PROVIDERS } from "../lib/modelProfiles";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { showToast } from "../stores/toastStore";
@@ -45,6 +48,7 @@ const PROVIDER_DISPLAY: Record<
   custom: { label: "Custom", description: "Your own endpoint", requiresKey: false, isLocal: false },
   // Not in ALL_PROVIDERS: it gets its own "Subscription (local CLI)" group.
   // isLocal is false here because that flag drives the local-server hints below.
+  codex_cli: { label: "Codex (subscription)", description: "Your ChatGPT login via local Codex CLI", requiresKey: false, isLocal: false },
   claude_cli: { label: "Claude (subscription)", description: "Your own Claude login (beta)", requiresKey: false, isLocal: false },
 };
 
@@ -323,6 +327,7 @@ export function LLMSettings() {
   const isLocal = info?.isLocal ?? false;
   const isCustom = selectedProvider === "custom";
   const isClaudeCli = selectedProvider === "claude_cli";
+  const isSubscriptionCli = isClaudeCli || selectedProvider === "codex_cli";
   // Claude can be made active once the CLI is found and logged in (or while
   // its login state is unknown); it has no model of its own to pick here.
   const claudeUnusable =
@@ -348,12 +353,16 @@ export function LLMSettings() {
         </div>
       </div>
 
+      {OPTION_PROVIDERS.includes(llmProvider) && llmProvider !== "codex_cli" && <MainModelProfileSettings />}
+
       {/* Subscription (local CLI) providers */}
       <ClaudeCliSettings
         selected={isClaudeCli}
         active={llmProvider === "claude_cli"}
         onSelect={() => handleProviderChange("claude_cli")}
       />
+
+      <CodexCliSettings selected={selectedProvider === "codex_cli"} active={llmProvider === "codex_cli"} onSelect={() => handleProviderChange("codex_cli")} />
 
       {/* Provider Selection */}
       <div className="rounded-xl border border-border/30 bg-card/50 p-5">
@@ -501,7 +510,7 @@ export function LLMSettings() {
       )}
 
       {/* Connection Test & Model Loading (Claude has its own above) */}
-      {!isClaudeCli && (
+      {!isSubscriptionCli && (
         <div className="rounded-xl border border-border/30 bg-card/50 p-5">
           <h3 className="mb-3 text-sm font-semibold text-primary/80">Connection</h3>
           <div className="flex items-center gap-2">
@@ -538,7 +547,7 @@ export function LLMSettings() {
       )}
 
       {/* Model Selection (Claude uses its Fast / Deep settings instead) */}
-      {!isClaudeCli && (
+      {!isSubscriptionCli && (
         <div className="rounded-xl border border-border/30 bg-card/50 p-5">
           <h3 className="mb-3 text-sm font-semibold text-primary/80">Model</h3>
           {selectedProvider === "openrouter" && openRouterModels.length > 0 ? (

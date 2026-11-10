@@ -8,6 +8,7 @@
 // broadcast so every window's store stays in sync.
 
 import { useEffect } from "react";
+import tauriConfig from "../../src-tauri/tauri.conf.json";
 import { load } from "@tauri-apps/plugin-store";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -42,6 +43,10 @@ const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 /** Windows that each run endMeetingFlow and hold part of the meeting's data. */
 const MEETING_WINDOWS = ["launcher", "overlay"];
 export const MEETING_END_TIMEOUT_MS = 60_000;
+
+// An empty update channel makes local forks use manual installers. The native
+// updater also rejects empty endpoints before it can contact a release server.
+export const UPDATES_ENABLED = tauriConfig.plugins.updater.endpoints.length > 0;
 
 export const RELEASES_URL = "https://github.com/naxhq/NexQ/releases";
 
@@ -81,6 +86,11 @@ async function broadcastPrefs(): Promise<void> {
 /** Load persisted preferences and any update already downloaded by Rust. */
 export async function hydrateUpdater(): Promise<void> {
   const updater = useUpdaterStore.getState();
+  if (!UPDATES_ENABLED) {
+    updater.setAutoUpdate(false);
+    return;
+  }
+
   try {
     const store = await settingsStore();
     const skipped = await store.get<string>(SKIPPED_VERSION_KEY);
@@ -106,6 +116,10 @@ export async function hydrateUpdater(): Promise<void> {
  * download after a manual check counts as explicit).
  */
 export async function checkForUpdates(opts?: { manual?: boolean }): Promise<void> {
+  if (!UPDATES_ENABLED) {
+    return;
+  }
+
   const { phase, startCheck } = useUpdaterStore.getState();
   if (phase === "checking" || phase === "downloading" || phase === "ready") return;
 
@@ -130,6 +144,10 @@ export async function checkForUpdates(opts?: { manual?: boolean }): Promise<void
  * agrees with what the user chose.
  */
 export async function downloadUpdateNow(opts?: { explicit?: boolean }): Promise<void> {
+  if (!UPDATES_ENABLED) {
+    return;
+  }
+
   const { phase, version, skippedVersion, startDownload } = useUpdaterStore.getState();
   if (phase === "downloading" || phase === "ready") return;
 
@@ -254,6 +272,10 @@ export async function skipVersion(version: string): Promise<void> {
 /** Runs the update loop. Mount once at the app root; active only in the launcher window. */
 export function useUpdater(): void {
   useEffect(() => {
+    if (!UPDATES_ENABLED) {
+      return;
+    }
+
     let label = "";
     try {
       label = getCurrentWebviewWindow().label;

@@ -1,13 +1,18 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
 import "./index.css";
 
 // Check if this window was opened as a detached DevLog view
 const params = new URLSearchParams(window.location.search);
 const view = params.get("view");
 
-if (view === "meeting-prompt") {
+if (view === "screen-capture") {
+  import("./screen/ScreenCaptureWindow").then(({ ScreenCaptureWindow }) => {
+    ReactDOM.createRoot(document.getElementById("root")!).render(
+      <React.StrictMode><ScreenCaptureWindow /></React.StrictMode>
+    );
+  });
+} else if (view === "meeting-prompt") {
   // Meeting detection prompt: its own tiny root, none of the app's hooks
   // (global shortcuts, config sync) run in this window.
   import("./meeting-prompt/MeetingPrompt").then(({ MeetingPromptWindow }) => {
@@ -36,9 +41,11 @@ if (view === "meeting-prompt") {
     });
   });
 } else {
-  ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
+  import("./App").then(({ default: App }) => {
+    ReactDOM.createRoot(document.getElementById("root")!).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
+  });
 }

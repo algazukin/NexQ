@@ -167,6 +167,18 @@ export async function setLLMProvider(provider: string): Promise<void> {
 }
 
 export async function listModels(provider: string): Promise<ModelInfo[]> {
+  if (provider === "codex_cli") {
+    return codexCliModels();
+  }
+  if (provider.startsWith("{")) {
+    try {
+      if (JSON.parse(provider).provider_type === "codex_cli") {
+        return codexCliModels();
+      }
+    } catch {
+      // Leave validation of malformed provider configuration to the backend.
+    }
+  }
   const result = await invoke<string>("list_models", { provider });
   return JSON.parse(result);
 }
@@ -231,6 +243,10 @@ export async function generateAssist(
     // No scope (or `default`): the backend keeps the action's own window.
     ...(opts.scope && opts.scope.kind !== "default" ? { scope: opts.scope } : {}),
   });
+}
+
+export async function toggleTrayVisibility(): Promise<void> {
+  return invoke("toggle_tray_visibility");
 }
 
 export async function cancelGeneration(): Promise<void> {
@@ -616,8 +632,8 @@ export async function translateText(text: string, targetLang: string, sourceLang
   return invoke<TranslationResult>("translate_text", { text, targetLang, sourceLang });
 }
 
-export async function translateSegments(segmentIds: string[], texts: string[], meetingId: string, targetLang: string, sourceLang?: string): Promise<void> {
-  return invoke("translate_segments", { segmentIds, texts, meetingId, targetLang, sourceLang });
+export async function translateSegments(segmentIds: string[], texts: string[], meetingId: string, targetLang: string, sourceLang?: string, incremental?: boolean): Promise<void> {
+  return invoke("translate_segments", { segmentIds, texts, meetingId, targetLang, sourceLang, incremental });
 }
 
 export async function translateBatch(meetingId: string, targetLang: string): Promise<{ total: number; alreadyDone: number; newlyTranslated: number }> {
@@ -829,4 +845,25 @@ export async function askMeeting(meetingId: string, question: string, requestId:
 /** The meeting's saved "Ask this meeting" chat, oldest first. */
 export async function listMeetingChat(meetingId: string): Promise<MeetingChatMessage[]> {
   return invoke<MeetingChatMessage[]>("list_meeting_chat", { meetingId });
+}
+
+export function codexCliStatus(): Promise<import("./types").CodexCliStatus> {
+  return invoke("codex_cli_status");
+}
+let codexCatalogCache: { expires: number; request: Promise<import("./types").CodexModelInfo[]> } | null = null;
+export function codexCliModels(refresh = false): Promise<import("./types").CodexModelInfo[]> {
+  if (!refresh && codexCatalogCache && codexCatalogCache.expires > Date.now()) {
+    return codexCatalogCache.request;
+  }
+  const entry = { expires: Date.now() + 60_000, request: invoke<import("./types").CodexModelInfo[]>("codex_cli_models") };
+  codexCatalogCache = entry;
+  entry.request.catch(() => {
+    if (codexCatalogCache === entry) {
+      codexCatalogCache = null;
+    }
+  });
+  return entry.request;
+}
+export function openCodexLoginTerminal(): Promise<void> {
+  return invoke("open_codex_login_terminal");
 }

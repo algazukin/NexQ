@@ -1,3 +1,4 @@
+import { normalizeAccelerator, reservedShortcutAction } from "../lib/shortcutLabel";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { showToast } from "../stores/toastStore";
@@ -6,6 +7,8 @@ import { RotateCcw, Keyboard } from "lucide-react";
 
 /** Display-friendly labels for each hotkey action */
 const HOTKEY_LABELS: Record<keyof HotkeyConfig, string> = {
+  hint_now: "Подсказка сейчас (global)",
+  hint_details: "Подробнее / кратко (global)",
   toggle_assist: "Toggle AI Assist",
   start_end_meeting: "Start / End Meeting",
   show_hide: "Show / Hide Overlay",
@@ -20,6 +23,8 @@ const HOTKEY_LABELS: Record<keyof HotkeyConfig, string> = {
 };
 
 const DEFAULT_HOTKEYS: HotkeyConfig = {
+  hint_now: "CmdOrCtrl+Alt+Space",
+  hint_details: "CmdOrCtrl+Alt+Enter",
   toggle_assist: "Space",
   start_end_meeting: "Ctrl+M",
   show_hide: "Ctrl+B",
@@ -81,9 +86,17 @@ export function HotkeySettings() {
       const conflictingAction = (
         Object.entries(hotkeys) as [keyof HotkeyConfig, string][]
       ).find(
-        ([action, binding]) => binding === combo && action !== editingKey
+        ([action, binding]) => normalizeAccelerator(binding) === normalizeAccelerator(combo) && action !== editingKey
       );
 
+      if (editingKey === "hint_now" || editingKey === "hint_details") {
+        const reserved = reservedShortcutAction(combo);
+        const stealth = useConfigStore.getState().stealthShortcut;
+        if (reserved || conflictingAction || (stealth && normalizeAccelerator(stealth) === normalizeAccelerator(combo))) {
+          setConflict(`"${combo}" is already used by ${reserved ?? (conflictingAction ? HOTKEY_LABELS[conflictingAction[0]] : "screen-share visibility")}`);
+          return;
+        }
+      }
       if (conflictingAction) {
         setConflict(
           `"${combo}" is already used by "${HOTKEY_LABELS[conflictingAction[0]]}"`

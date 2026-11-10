@@ -23,15 +23,18 @@ export async function showLauncherWindow(): Promise<void> {
  * own view decides what it renders, so callers outside it should use
  * {@link showMeetingOverlay}.
  */
-export async function showOverlayWindow(): Promise<void> {
+export async function showOverlayWindow({ focus = true }: { focus?: boolean } = {}): Promise<void> {
   const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
   const overlay = await WebviewWindow.getByLabel("overlay");
   const launcher = await WebviewWindow.getByLabel("launcher");
 
   if (overlay) {
-    await overlay.show().catch(() => {});
+    await overlay.setFocusable(focus);
+    await overlay.show();
     await overlay.unminimize().catch(() => {});
-    await overlay.setFocus().catch(() => {});
+    if (focus) {
+      await overlay.setFocus().catch(() => {});
+    }
   }
   await launcher?.hide().catch(() => {});
 }
@@ -42,7 +45,7 @@ export const SHOW_MEETING_OVERLAY_EVENT = "nexq:show_meeting_overlay";
 /**
  * Bring back the floating meeting overlay from any window (launcher RETURN,
  * Ctrl+B, tray). The overlay window switches itself to the meeting view and
- * shows; without a running meeting it shows the launcher instead.
+ * shows. It can also restore a standalone screen answer; with neither it shows the launcher.
  */
 export async function showMeetingOverlay(): Promise<void> {
   const { emit } = await import("@tauri-apps/api/event");

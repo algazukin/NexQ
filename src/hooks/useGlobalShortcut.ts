@@ -1,3 +1,4 @@
+import { emitTo } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import {
   register,
@@ -5,13 +6,13 @@ import {
 } from "@tauri-apps/plugin-global-shortcut";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useAIActionsStore } from "../stores/aiActionsStore";
-import { isQuitPending } from "../lib/ipc";
+import { isQuitPending, toggleTrayVisibility } from "../lib/ipc";
 import { runUserAction } from "../lib/userAction";
 import { isOverlayVisible, meetingShortcutAction, showLauncherWindow, showMeetingOverlay } from "../lib/windows";
 import { endMeetingFromThisWindow } from "./useUpdater";
 import { showToast } from "../stores/toastStore";
 import { useConfigStore } from "../stores/configStore";
-import { reservedShortcutAction } from "../lib/shortcutLabel";
+import { normalizeAccelerator, reservedShortcutAction } from "../lib/shortcutLabel";
 
 /** Ctrl+M: end the running meeting (in every window that holds it) or start one. */
 async function toggleMeetingFromShortcut(): Promise<void> {
@@ -43,93 +44,68 @@ export async function toggleStealthMode(): Promise<void> {
   }
 }
 
-export function useGlobalShortcut() {
+// Global shortcuts belong to the launcher; every native window has a separate React root.
+// Serialize asynchronous setup/cleanup to preserve handlers across StrictMode remounts.
+let globalShortcutLifecycle = Promise.resolve();
+
+export function useGlobalShortcut(windowLabel: string) {
   const stealthShortcut = useConfigStore((s) => s.stealthShortcut);
+  const hintShortcut = useConfigStore((state) => state.hotkeys.hint_now ?? "CmdOrCtrl+Alt+Space");
+  const detailsShortcut = useConfigStore((state) => state.hotkeys.hint_details ?? "CmdOrCtrl+Alt+Enter");
 
-  // Stealth mode shortcut (user-configurable, re-registered when it changes)
   useEffect(() => {
-    const key = stealthShortcut;
-    // Never take over a built-in shortcut (e.g. a binding saved before it was
-    // reserved): registering it would unregister that action's handler.
-    if (!key || reservedShortcutAction(key)) {
-      if (key) console.warn(`[useGlobalShortcut] Stealth shortcut ${key} collides with a built-in shortcut; not registered`);
-      return;
-    }
-    let registered = false;
-    (async () => {
-      try {
-        await unregister(key).catch(() => {});
-        await register(key, (event) => {
-          if (event.state === "Pressed") toggleStealthMode().catch(() => {});
-        });
-        registered = true;
-      } catch (err) {
-        console.warn(`Failed to register stealth shortcut ${key}:`, err);
+    if (windowLabel !== "launcher") return;
+    let disposed = false;
+    const registered: string[] = [];
+    const definitions: Array<{ key: string; action: () => Promise<void> }> = [
+      { key: "CmdOrCtrl+Alt+B", action: toggleTrayVisibility },
+      { key: "CmdOrCtrl+M", action: toggleMeetingFromShortcut },
+      { key: "CmdOrCtrl+B", action: async () => {
+        if (await isOverlayVisible()) await showLauncherWindow();
+        else await showMeetingOverlay();
+      } },
+      { key: "CmdOrCtrl+,", action: async () => {
+        const store = useMeetingStore.getState();
+        await showLauncherWindow();
+        store.setCurrentView(store.currentView === "settings" ? "launcher" : "settings");
+      } },
+    ];
+    for (const binding of [
+      { key: hintShortcut, action: () => emitTo("overlay", "nexq:hint-action", { action: "now" }) },
+      { key: detailsShortcut, action: () => emitTo("overlay", "nexq:hint-action", { action: "details" }) },
+    ]) {
+      const key = normalizeAccelerator(binding.key);
+      if (reservedShortcutAction(key) || (stealthShortcut && normalizeAccelerator(stealthShortcut) === key) || definitions.some((item) => normalizeAccelerator(item.key) === key)) {
+        console.warn(`[hints] Shortcut ${binding.key} conflicts with another action`);
+        continue;
       }
-    })();
-    return () => {
-      if (registered) unregister(key).catch(() => {});
-    };
-  }, [stealthShortcut]);
-
-  // Global shortcuts (work even when window is not focused)
-  useEffect(() => {
-    const shortcuts: string[] = [];
-
-    async function registerShortcuts() {
-      // Register each shortcut independently — one failure shouldn't block the rest.
-      // Unregister first to handle hot-reload / React strict mode re-mounts.
-      const defs: Array<{ key: string; handler: (event: { state: string }) => void }> = [
-        {
-          key: "CmdOrCtrl+M",
-          handler: (event) => {
-            if (event.state === "Pressed") {
-              toggleMeetingFromShortcut().catch(() => {});
-            }
-          },
-        },
-        {
-          key: "CmdOrCtrl+B",
-          handler: (event) => {
-            if (event.state === "Pressed") {
-              (async () => {
-                if (await isOverlayVisible()) await showLauncherWindow();
-                else if (useMeetingStore.getState().activeMeeting) await showMeetingOverlay();
-              })().catch(() => {});
-            }
-          },
-        },
-        {
-          key: "CmdOrCtrl+,",
-          handler: (event) => {
-            if (event.state === "Pressed") {
-              const store = useMeetingStore.getState();
-              store.setSettingsOpen(!store.settingsOpen);
-            }
-          },
-        },
-      ];
-
-      for (const { key, handler } of defs) {
+      definitions.push(binding);
+    }
+    if (stealthShortcut && !reservedShortcutAction(stealthShortcut)) {
+      definitions.push({ key: stealthShortcut, action: toggleStealthMode });
+    }
+    globalShortcutLifecycle = globalShortcutLifecycle.then(async () => {
+      for (const { key, action } of definitions) {
+        if (disposed) return;
         try {
-          await unregister(key).catch(() => {}); // Clean up stale registration
-          await register(key, handler);
-          shortcuts.push(key);
+          await unregister(key).catch(() => {});
+          if (disposed) return;
+          await register(key, (event) => {
+            if (!disposed && event.state === "Pressed") action().catch(() => {});
+          });
+          registered.push(key);
         } catch (err) {
           console.warn(`Failed to register shortcut ${key}:`, err);
         }
       }
-    }
-
-    registerShortcuts();
-
+    });
     return () => {
-      shortcuts.forEach((s) => {
-        unregister(s).catch(() => {});
+      disposed = true;
+      globalShortcutLifecycle = globalShortcutLifecycle.then(async () => {
+        for (const key of registered) await unregister(key).catch(() => {});
       });
     };
-  }, []);
-
+  }, [windowLabel, stealthShortcut, hintShortcut, detailsShortcut]);
   // Window-level shortcuts (work when window is active/focused)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {

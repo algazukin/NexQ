@@ -12,13 +12,11 @@ import { useMeetingStore } from "../stores/meetingStore";
 import { translateSegments, getMeetingTranslations } from "../lib/ipc";
 import type { TranscriptUpdateEvent } from "../lib/types";
 
-export function useTranslation() {
+export function useTranslation(ownsAutoTranslation: boolean) {
   const addTranslation = useTranslationStore((s) => s.addTranslation);
   const addTranslations = useTranslationStore((s) => s.addTranslations);
   const setBatchProgress = useTranslationStore((s) => s.setBatchProgress);
-  const autoTranslateActive = useTranslationStore((s) => s.autoTranslateActive);
   const targetLang = useTranslationStore((s) => s.targetLang);
-  const sourceLang = useTranslationStore((s) => s.sourceLang);
   const setTranslating = useTranslationStore((s) => s.setTranslating);
 
   const activeMeeting = useMeetingStore((s) => s.activeMeeting);
@@ -28,22 +26,14 @@ export function useTranslation() {
   const addRef = useRef(addTranslation);
   const addTranslationsRef = useRef(addTranslations);
   const progressRef = useRef(setBatchProgress);
-  const autoTranslateActiveRef = useRef(autoTranslateActive);
-  const targetLangRef = useRef(targetLang);
-  const sourceLangRef = useRef(sourceLang);
   const setTranslatingRef = useRef(setTranslating);
-  const meetingIdRef = useRef(meetingId);
 
   useEffect(() => {
     addRef.current = addTranslation;
     addTranslationsRef.current = addTranslations;
     progressRef.current = setBatchProgress;
-    autoTranslateActiveRef.current = autoTranslateActive;
-    targetLangRef.current = targetLang;
-    sourceLangRef.current = sourceLang;
     setTranslatingRef.current = setTranslating;
-    meetingIdRef.current = meetingId;
-  }, [addTranslation, addTranslations, setBatchProgress, autoTranslateActive, targetLang, sourceLang, setTranslating, meetingId]);
+  }, [addTranslation, addTranslations, setBatchProgress, setTranslating]);
 
   // Subscribe to translation result/error/progress events
   useEffect(() => {
@@ -95,78 +85,74 @@ export function useTranslation() {
     };
   }, []);
 
-  // Auto-translate: listen for final transcript segments and translate when active
+  // The overlay owns auto-translation; other windows still receive results.
   useEffect(() => {
-    let unFinal: UnlistenFn | null = null;
+    if (!ownsAutoTranslation || !meetingId) {
+      return;
+    }
+
     let mounted = true;
-    // Debounce timer ref per segment — stored as map of segmentId -> timeoutId
-    const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    let unlisten: UnlistenFn | null = null;
+    // One request per paragraph at a time. Keep only its latest pending version.
+    const latestText = new Map<string, string>();
 
-    const setup = async () => {
-      const u = await onTranscriptFinal((event: TranscriptUpdateEvent) => {
-        if (!mounted) return;
-
-        const { segment } = event;
-        if (!segment.is_final) return;
-
-        const active = autoTranslateActiveRef.current;
-        const mid = meetingIdRef.current;
-        if (!active || !mid) return;
-
-        const segmentId = segment.id;
-
-        // Clear any pending debounce for this segment
-        const existing = debounceTimers.get(segmentId);
-        if (existing !== undefined) {
-          clearTimeout(existing);
-        }
-
-        // Debounce by 200ms to avoid rapid successive calls
-        const timer = setTimeout(() => {
-          debounceTimers.delete(segmentId);
-
-          const currentActive = autoTranslateActiveRef.current;
-          const currentMid = meetingIdRef.current;
-          const currentTarget = targetLangRef.current;
-          const currentSource = sourceLangRef.current;
-
-          if (!currentActive || !currentMid || !currentTarget) return;
-
-          setTranslatingRef.current(segmentId, true);
-          translateSegments(
-            [segmentId],
-            [segment.text],
-            currentMid,
-            currentTarget,
-            currentSource === "auto" ? undefined : currentSource,
-          ).catch((err) => {
-            console.error("[useTranslation] Auto-translate failed:", err);
-            setTranslatingRef.current(segmentId, false);
-          });
-        }, 200);
-
-        debounceTimers.set(segmentId, timer);
-      });
-
-      if (mounted) {
-        unFinal = u;
-      } else {
-        u();
+    onTranscriptFinal(async ({ segment }: TranscriptUpdateEvent) => {
+      if (!mounted || !segment.is_final || !segment.text || !useTranslationStore.getState().autoTranslateActive) {
+        return;
       }
-    };
 
-    setup();
+      const { id } = segment;
+      const running = latestText.has(id);
+      latestText.set(id, segment.text);
+      if (running) {
+        return;
+      }
+
+      try {
+        while (mounted && useMeetingStore.getState().activeMeeting?.id === meetingId) {
+          const { autoTranslateActive, translations, targetLang, sourceLang, setTranslating } =
+            useTranslationStore.getState();
+          const text = latestText.get(id);
+          if (!autoTranslateActive || !targetLang || !text) {
+            break;
+          }
+
+          const previous = translations.get(id);
+          if (previous?.original_text === text && previous.target_lang === targetLang
+            && previous.source_lang === sourceLang) {
+            break;
+          }
+
+          setTranslating(id, true);
+          try {
+            await translateSegments([id], [text], meetingId, targetLang,
+              sourceLang === "auto" ? undefined : sourceLang, true);
+          } catch (err) {
+            console.error("[useTranslation] Auto-translate failed:", err);
+            setTranslating(id, false);
+          }
+
+          if (latestText.get(id) === text) {
+            break;
+          }
+        }
+      } finally {
+        latestText.delete(id);
+      }
+    }).then((dispose) => {
+      if (mounted) {
+        unlisten = dispose;
+      } else {
+        dispose();
+      }
+    });
 
     return () => {
       mounted = false;
-      // Clear all pending debounce timers
-      for (const timer of debounceTimers.values()) {
-        clearTimeout(timer);
-      }
-      debounceTimers.clear();
-      if (unFinal) unFinal();
+      latestText.clear();
+      unlisten?.();
     };
-  }, []);
+  }, [ownsAutoTranslation, meetingId]);
 
   // Preload cached translations when meeting ID or target language changes
   useEffect(() => {

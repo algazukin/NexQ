@@ -18,6 +18,8 @@ import { useSTTStatus } from "../hooks/useSTTStatus";
 import { useDevLog } from "../hooks/useDevLog";
 
 export function ActiveMeetingProvider({ isLauncherWindow = true }: { isLauncherWindow?: boolean }) {
+  // A screen task streams even when no meeting is running. Keep one subscription per window.
+  useStreamBuffer();
   const activeMeeting = useMeetingStore((s) => s.activeMeeting);
 
   if (!activeMeeting) return null;
@@ -32,7 +34,6 @@ export function ActiveMeetingProvider({ isLauncherWindow = true }: { isLauncherW
 function OverlayMeetingHooks() {
   useMeetingTimer();
   useTranscript();    // transcript_final/update → local store
-  useStreamBuffer();  // AI streaming events → local store
   useSTTStatus();     // STT connection status
   useDevLog();        // debug log entries
   return null;
@@ -45,7 +46,6 @@ function LauncherMeetingHooks() {
   useSpeechRecognition();  // web speech API (emits cross-window events for overlay)
   useAudioConfigSync();    // hot-swap STT/audio config
   useTranscriptPersistence(); // transcript store → SQLite DB
-  useStreamBuffer();
   useCallLogCapture();
   useSTTStatus();
   useDevLog();

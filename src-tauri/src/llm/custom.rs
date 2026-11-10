@@ -6,8 +6,8 @@ use serde_json::json;
 use std::time::Instant;
 
 use super::provider::{
-    CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
-    cancellable, check_cancelled, is_cancelled, emit_end, emit_error, emit_token, TokenSink,
+    cancellable, check_cancelled, emit_end, emit_error, emit_token, is_cancelled, CompletionStats,
+    GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo, TokenSink,
 };
 use super::stream_parser::{LineBuffer, NDJSONParser, SSEParser};
 
@@ -51,11 +51,7 @@ impl CustomClient {
                 }
             }
             CustomAuthType::ApiKey => {
-                let header = self
-                    .config
-                    .auth_header
-                    .as_deref()
-                    .unwrap_or("x-api-key");
+                let header = self.config.auth_header.as_deref().unwrap_or("x-api-key");
                 if let Some(ref key) = self.config.auth_value {
                     builder.header(header, key.as_str())
                 } else {
@@ -63,6 +59,48 @@ impl CustomClient {
                 }
             }
         }
+    }
+
+    /// Send a completion request, with legacy Ollama endpoint detection for text.
+    async fn completion_response(
+        &self,
+        body: &serde_json::Value,
+        params: &GenerationParams,
+    ) -> Result<reqwest::Response, LLMError> {
+        let url = format!("{}/chat/completions", self.config.base_url);
+        let request = self
+            .apply_auth(self.client.post(&url))
+            .header("Content-Type", "application/json")
+            .json(body);
+        let response = cancellable(params, request.send()).await??;
+        let response =
+            if params.images.is_empty() && matches!(response.status().as_u16(), 404 | 405) {
+                let url = format!("{}/api/chat", self.config.base_url);
+                let fallback_body =
+                    json!({"model": body["model"], "messages": body["messages"], "stream": true});
+                let request = self
+                    .apply_auth(self.client.post(&url))
+                    .header("Content-Type", "application/json")
+                    .json(&fallback_body);
+                cancellable(params, request.send()).await??
+            } else {
+                response
+            };
+        if !response.status().is_success() {
+            let status = response.status();
+            // Image endpoints may echo request content. Keep raw images out of error events and the AI log.
+            let message = if params.images.is_empty() {
+                let body = cancellable(params, response.text())
+                    .await?
+                    .unwrap_or_default();
+                format!("Custom endpoint request failed ({}): {}", status, body)
+            } else {
+                format!("Custom endpoint image request failed ({})", status)
+            };
+            check_cancelled(params)?;
+            return Err(LLMError::ProviderError(message));
+        }
+        Ok(response)
     }
 
     /// Detect whether a stream is SSE or NDJSON and parse tokens accordingly.
@@ -144,6 +182,10 @@ impl CustomClient {
 impl LLMProvider for CustomClient {
     fn provider_name(&self) -> &str {
         "custom"
+    }
+
+    fn supports_images(&self) -> bool {
+        true
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LLMError> {
@@ -250,18 +292,10 @@ impl LLMProvider for CustomClient {
     ) -> Result<CompletionStats, LLMError> {
         let start = Instant::now();
 
-        // Try OpenAI-compatible format first
-        let url = format!("{}/chat/completions", self.config.base_url);
-
-        let msgs: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| {
-                json!({
-                    "role": m.role,
-                    "content": m.content
-                })
-            })
-            .collect();
+        let msgs = super::vision::openai_messages(&messages, &params.images).map_err(|error| {
+            emit_error(&app_handle, &params, &error.to_string());
+            error
+        })?;
 
         let mut body = json!({
             "model": model,
@@ -269,6 +303,7 @@ impl LLMProvider for CustomClient {
             "stream": true
         });
 
+        super::profiles::apply_http_options(&mut body, &super::profiles::request_options(&app_handle, &params));
         if let Some(temp) = params.temperature {
             body["temperature"] = json!(temp);
         }
@@ -279,48 +314,13 @@ impl LLMProvider for CustomClient {
         // NOTE: llm_stream_start is emitted by IntelligenceEngine::generate_assist()
         // with the correct mode. Do NOT emit it here — it would overwrite the mode.
 
-        let request = self
-            .apply_auth(self.client.post(&url))
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        let response = match cancellable(&params, request.send()).await? {
-            Ok(resp) if resp.status().is_success() => resp,
-            _ => {
-                // Fall back to Ollama-compatible endpoint
-                let url = format!("{}/api/chat", self.config.base_url);
-                let body = json!({
-                    "model": model,
-                    "messages": msgs,
-                    "stream": true
-                });
-
-                let request = self
-                    .apply_auth(self.client.post(&url))
-                    .header("Content-Type", "application/json")
-                    .json(&body);
-
-                cancellable(&params, request.send()).await?.map_err(|e| {
-                    if is_cancelled(&params) {
-                        return LLMError::Cancelled;
-                    }
-                    emit_error(&app_handle, &params, &e.to_string());
-                    LLMError::ConnectionFailed(format!(
-                        "Failed to connect to custom endpoint: {}",
-                        e
-                    ))
-                })?
-            }
-        };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            let err_msg = format!("Custom endpoint request failed ({}): {}", status, body);
-            check_cancelled(&params)?;
-            emit_error(&app_handle, &params, &err_msg);
-            return Err(LLMError::ProviderError(err_msg));
-        }
+        let response = self
+            .completion_response(&body, &params)
+            .await
+            .map_err(|error| {
+                emit_error(&app_handle, &params, &error.to_string());
+                error
+            })?;
 
         let mut stream = response.bytes_stream();
         let mut line_buffer = LineBuffer::new();
@@ -379,5 +379,136 @@ impl LLMProvider for CustomClient {
         emit_end(&app_handle, &params, token_count, latency_ms);
 
         Ok(stats)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn endpoint(
+        status: u16,
+    ) -> (CustomClient, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let observed = requests.clone();
+        let server = tokio::spawn(async move {
+            for code in [status, 200] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0; 4096];
+                loop {
+                    let read = socket.read(&mut chunk).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&chunk[..read]);
+                    if let Some(header_end) =
+                        request.windows(4).position(|part| part == b"\r\n\r\n")
+                    {
+                        let headers = String::from_utf8_lossy(&request[..header_end]);
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| {
+                                        value
+                                            .strip_prefix(' ')
+                                            .unwrap_or(value)
+                                            .parse::<usize>()
+                                            .ok()
+                                    })
+                                    .flatten()
+                            })
+                            .unwrap_or(0);
+                        if request.len() >= header_end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                observed.fetch_add(1, Ordering::SeqCst);
+                let body =
+                    r#"{"error":{"message":"upstream failure data:image/png;base64,private"}}"#;
+                let response = format!(
+                    "HTTP/1.1 {code} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let client = CustomClient::new(CustomConfig {
+            base_url,
+            auth_type: CustomAuthType::None,
+            auth_value: None,
+            auth_header: None,
+        });
+        (client, requests, server)
+    }
+
+    #[tokio::test]
+    async fn image_requests_never_retry_as_ollama() {
+        // Arrange
+        let (client, requests, server) = endpoint(404).await;
+        let params = GenerationParams {
+            images: vec!["data:image/png;base64,private".into()],
+            ..Default::default()
+        };
+        let body = json!({"model":"vision-model", "messages":[], "stream":true});
+
+        // Act
+        let result = client.completion_response(&body, &params).await;
+        server.abort();
+
+        // Assert
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("404"), "{error}");
+        assert!(!error.contains("private"));
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn text_requests_preserve_auth_rate_limit_and_server_failures() {
+        // Arrange
+        for status in [401, 429, 503] {
+            let (client, requests, server) = endpoint(status).await;
+            let params = GenerationParams::default();
+            let body = json!({"model":"text-model", "messages":[], "stream":true});
+
+            // Act
+            let result = client.completion_response(&body, &params).await;
+            server.abort();
+
+            // Assert
+            let error = result.unwrap_err().to_string();
+            assert!(error.contains(&status.to_string()), "{error}");
+            assert!(error.contains("upstream failure"), "{error}");
+            assert_eq!(requests.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn text_requests_retry_unsupported_openai_endpoints_as_ollama() {
+        // Arrange
+        for status in [404, 405] {
+            let (client, requests, server) = endpoint(status).await;
+            let body = json!({"model":"text-model", "messages":[], "stream":true});
+
+            // Act
+            let result = client
+                .completion_response(&body, &GenerationParams::default())
+                .await;
+            server.abort();
+
+            // Assert
+            assert!(result.unwrap().status().is_success());
+            assert_eq!(requests.load(Ordering::SeqCst), 2);
+        }
     }
 }

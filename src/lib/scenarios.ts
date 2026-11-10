@@ -1,4 +1,5 @@
 import type { ScenarioTemplate } from "./types";
+import technicalInterviewInstructions from "./technicalInterviewInstructions.txt?raw";
 
 export const BUILT_IN_SCENARIOS: ScenarioTemplate[] = [
   {
@@ -55,14 +56,9 @@ Questions asked by audience members and the lecturer's responses.`,
   {
     id: "interview",
     name: "Interview",
-    description: "Questions, responses, follow-ups",
-    system_prompt: `You are an AI assistant in an interview. Your role:
-- Track questions asked by the interviewer
-- Summarize candidate responses
-- Note follow-up questions and areas of deeper exploration
-- Identify key qualifications or concerns raised
-- Maintain a neutral, objective tone`,
-    summary_prompt: `Summarize this interview:
+    description: "Programming questions and coding tasks",
+    system_prompt: technicalInterviewInstructions,
+    summary_prompt: `Summarize only the programming questions and coding tasks in this interview. Ignore small talk and unrelated stories or background media:
 ## Questions & Answers
 For each question, provide:
 - **Q:** The question asked
@@ -74,7 +70,7 @@ Major topics or skills discussed.
 
 ## Assessment Notes
 Objective observations about the conversation flow.`,
-    question_detection_prompt: `Detect interview questions — focus on questions from the interviewer to the candidate. Flag questions that were asked but not fully answered, or that warrant follow-up.`,
+    question_detection_prompt: `Detect programming questions, coding tasks and technical follow-ups from the interviewer. Ignore small talk, unrelated stories, background media and rhetorical questions outside the programming task. Never invent a technical question from nontechnical narration.`,
     is_custom: false,
   },
   {

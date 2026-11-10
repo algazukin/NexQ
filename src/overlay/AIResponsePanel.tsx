@@ -27,7 +27,7 @@ type TabId = "current" | `resp-${string}` | `pinned-${string}`;
 const PREVIOUS_TABS = 4;
 
 // Sub-PRD 6: Streaming markdown, response history tabs, pin/copy
-export function AIResponsePanel() {
+export function AIResponsePanel({ emptyHint }: { emptyHint?: string } = {}) {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const phase = useStreamStore((s) => s.phase);
   const currentContent = useStreamStore((s) => s.currentContent);
@@ -218,7 +218,7 @@ export function AIResponsePanel() {
           <div className="space-y-2.5" aria-atomic="false">
             <ResponseProgress />
             {currentContent && (
-              <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
+              <div className={`prose prose-sm prose-invert max-w-none leading-relaxed ${currentMode === "CodeReview" ? "code-review" : ""}`} style={proseStyle}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {currentContent}
                 </ReactMarkdown>
@@ -241,7 +241,7 @@ export function AIResponsePanel() {
                 onPin={currentResponse ? () => handlePin(currentResponse.id) : undefined}
               />
             )}
-            <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
+            <div className={`prose prose-sm prose-invert max-w-none leading-relaxed ${currentMode === "CodeReview" ? "code-review" : ""}`} style={proseStyle}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {currentContent}
               </ReactMarkdown>
@@ -261,7 +261,7 @@ export function AIResponsePanel() {
               onCopy={() => handleCopy(displayContent, displayResponse!.id)}
               onPin={() => handlePin(displayResponse!.id)}
             />
-            <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
+            <div className={`prose prose-sm prose-invert max-w-none leading-relaxed ${displayResponse.mode === "CodeReview" ? "code-review" : ""}`} style={proseStyle}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {displayContent}
               </ReactMarkdown>
@@ -275,7 +275,7 @@ export function AIResponsePanel() {
           <div className="flex h-full flex-col items-center justify-center gap-2">
             <Sparkles className="h-5 w-5 text-primary/30" />
             <p className="text-xs text-muted-foreground/50">
-              Press <kbd className="mx-0.5 rounded border border-border/30 bg-secondary/30 px-1.5 py-0.5 font-mono text-meta text-foreground/70">Space</kbd> for AI assistance
+              {emptyHint ?? <>Press <kbd className="mx-0.5 rounded border border-border/30 bg-secondary/30 px-1.5 py-0.5 font-mono text-meta text-foreground/70">Space</kbd> for AI assistance</>}
             </p>
           </div>
         )}

@@ -1,3 +1,4 @@
+import { TranslationProfileSettings } from "./TranslationProfileSettings";
 // Translation Settings — provider selector with API key management, language config, and behavior toggles.
 // Follows the STT/LLM settings pattern: provider grid, API key input, test connection, make active.
 
@@ -80,7 +81,7 @@ const CLOUD_PROVIDERS: ProviderOption[] = [
   {
     value: "google",
     label: "Google Translate",
-    description: "133 langs · $20 free/mo",
+    description: "500K chars free/mo",
     requiresApiKey: true,
     isLocal: false,
     credentialKey: "translation_google",
@@ -90,7 +91,7 @@ const CLOUD_PROVIDERS: ProviderOption[] = [
   {
     value: "deepl",
     label: "DeepL",
-    description: "31 langs · 500K free/mo",
+    description: "1M chars trial (new plans)",
     requiresApiKey: true,
     isLocal: false,
     credentialKey: "translation_deepl",
@@ -745,6 +746,8 @@ export function TranslationSettings() {
 
           {/* ── OPUS-MT Model Manager ── */}
           {isOpusMt && <OpusMtModelManager onModelsChanged={refreshOpusMtModels} />}
+
+          {isLlm && <TranslationProfileSettings />}
 
           {/* ── LLM local provider — Test Connection ── */}
           {isLlm && (

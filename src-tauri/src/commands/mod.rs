@@ -1,5 +1,6 @@
 pub mod audio_commands;
 pub mod claude_cli_commands;
+pub mod codex_cli_commands;
 pub mod context_commands;
 pub mod credential_commands;
 pub mod gemini_cache_commands;
@@ -9,6 +10,7 @@ pub mod meeting_chat_commands;
 pub mod meeting_commands;
 pub mod model_commands;
 pub mod settings_commands;
+pub mod screen_task_commands;
 pub mod stealth_commands;
 pub mod stt_commands;
 pub mod rag_commands;

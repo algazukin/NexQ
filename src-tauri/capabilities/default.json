@@ -1,7 +1,7 @@
 {
   "identifier": "default",
   "description": "Default capability set for NexQ",
-  "windows": ["launcher", "overlay", "devlog", "meeting-prompt"],
+  "windows": ["launcher", "overlay", "devlog", "meeting-prompt", "screen-capture"],
   "permissions": [
     "core:default",
     "core:window:default",
@@ -11,6 +11,8 @@
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-set-focus",
+    "core:window:allow-set-focusable",
+    "core:window:allow-set-min-size",
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-size",
     "core:window:allow-set-position",

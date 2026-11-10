@@ -195,6 +195,10 @@ The AI Actions panel configures how NexQ's AI assistance behaves during meetings
 - **Response style** -- adjust the tone, length, and format of AI responses
 - **Context window** -- control how much conversation history is sent to the LLM with each request
 
+This fork defaults **Additional Instructions** to a C#/.NET interview profile: idiomatic C# code, efficient algorithms and memory use, relevant edge cases, and a short complexity/trade-off explanation. Technical answers use C#/.NET semantics. These instructions also accompany screen tasks and do not add model requests or a tool loop.
+
+Edit the profile in **Settings > AI Actions > Additional Instructions**. Saved custom instructions take precedence over the default. Ordinary actions use it when **Custom Instructions** is enabled for that action; screen tasks always include it.
+
 ## AI Scenarios
 
 ![AI Scenarios settings panel](../../website/public/screenshots/Setting/Setting-AI%20Scenarios.png)
@@ -257,3 +261,36 @@ The Translation settings configure real-time translation of meeting transcripts.
 - **Display mode** -- show translations inline alongside the original text, or replace the original text entirely
 
 Translation works in real-time during meetings, providing translated text alongside or in place of the original transcription.
+
+## Local fork updates
+
+This fork uses manual installers. Its official NexQ update channel is disabled in `src-tauri/tauri.conf.json` so an upstream update cannot replace screen capture and the C#/.NET profile. Settings → About shows **Local fork — manual updates** and disables the automatic update switch, including when an older installation saved that preference as enabled. Install future fork builds manually.
+
+
+## Compact hints
+
+The fork starts meetings and screen answers in a compact hint card. Remote finalized questions are combined after 750 ms of silence. Own speech, recent repeats, open details, and a screen task prevent automatic replacement. Answers stay available for at least 8 seconds after completion; queued questions expire after 15 seconds. Auto-Trigger in AI Actions controls automatic hints; the card also has a pause button.
+
+- **Подскажи** / **Ctrl+Alt+Space**: answer the latest remote question now.
+- **Подробнее / Кратко** / **Ctrl+Alt+Enter**: expand the displayed question, or return to the short answer. Completed details are cached.
+- **Экран** / **Ctrl+Alt+S**: capture the active display and let the model locate the main task automatically. Shift-click **Экран** for optional manual area selection.
+- For screen tasks, **Подробнее** requests complete efficient C# against the same capture. **К вопросам** resumes speech hints.
+- The full-mode header icon opens the original transcript/history interface. **Подсказки** returns to the compact card.
+
+Both hint shortcuts can be changed in Settings → Hotkeys and synchronize across the two windows. The compact window is non-focusable on Windows; settings and the full view restore focusability. This behavior does not establish invisibility to interview sites or screen recorders.
+
+
+### Hide in tray
+
+**Ctrl+Alt+B** hides both NexQ windows and restores the meeting/screen panel on the next press. It leaves recording and transcription running. **Ctrl+B** continues to switch between the dashboard and overlay.
+
+For Windows **Win+Shift+S** or another external capture tool, hide NexQ with **Ctrl+Alt+B** before taking the screenshot. Capture exclusion depends on the external capture path and may produce a black rectangle; this shortcut removes the windows from the desktop instead. The built-in **Экран** action hides NexQ automatically before taking its own image.
+
+
+### Programming interview focus
+
+The built-in **Interview** scenario answers programming questions and coding tasks in C#/.NET. Live Assist uses the selected scenario when its action prompt is still the default; a deliberately customized Assist prompt keeps its override. Hints and screenshot tasks use the same technical relevance policy.
+
+Unrelated small talk, stories, background videos and nontechnical rhetorical questions should not be summarized or mixed into a technical answer. If there is no programming question or task, the assistant replies only “Нет технического вопроса.” A story that defines an actual coding problem still supplies its relevant constraints. This is an instruction within the existing model call, not another classification request; unrelated speech remains in the transcript.
+
+**More / Подробнее** gives one sentence with the idea, one C# method/class code block and one complexity line. Boilerplate, demonstrations and tutorial sections are omitted unless the task requires them. Essential concurrency, cancellation and error handling stay intact; 15-35 lines is a preference for simple tasks, not a correctness-breaking hard limit. Conceptual answers use 2-4 direct sentences.

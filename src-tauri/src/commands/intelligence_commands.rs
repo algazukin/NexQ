@@ -731,7 +731,8 @@ pub async fn generate_assist(
             .ok_or_else(|| "Generation already in progress".to_string())?;
 
         // Look up per-action config
-        let action_cfg = engine.get_action_config(&mode).cloned();
+        let action_cfg = crate::intelligence::action_config::hint_action_config(&mode)
+            .or_else(|| engine.get_action_config(&mode).cloned());
         let global_defaults = engine.get_action_configs().global_defaults.clone();
 
         // Compose instructions from AllActionConfigs (reliable path — same sync as system prompts)
@@ -795,6 +796,12 @@ pub async fn generate_assist(
         .and_then(|c| c.temperature)
         .unwrap_or(global_defaults.temperature);
 
+    let scenario_prompt = state.active_scenario.read().ok()
+        .map(|scenario| scenario.system_prompt.clone()).unwrap_or_default();
+    let base_system_prompt = crate::intelligence::action_config::action_system_prompt(
+        &mode, action_cfg.as_ref(), &scenario_prompt,
+    );
+
     // ── Route: warm Claude session, fallback provider, or stateless ──
     let (scope, epoch) = request_scope(&state, past_meeting_id.as_deref());
     let mut route = request_route(&state, &mode, &scope);
@@ -802,10 +809,7 @@ pub async fn generate_assist(
     if let Route::ClaudeSession(key) = &route {
         // The action's own prompt (or the mode template) and presets travel in
         // the user message; the scenario prompt is the session's system prompt.
-        let action_prompt = action_cfg
-            .as_ref()
-            .map(|c| c.system_prompt.clone())
-            .unwrap_or_else(|| crate::intelligence::prompt_templates::get_system_prompt(&mode).to_string());
+        let action_prompt = base_system_prompt.clone();
         let task_instructions = if include_instructions && !presets.is_empty() {
             format!("{}\n\n{}", action_prompt, presets)
         } else {
@@ -832,10 +836,12 @@ pub async fn generate_assist(
             params: GenerationParams {
                 temperature: None,
                 max_tokens: None,
+                model_options: None,
                 cache_name: None,
                 enable_web_search: false,
                 request_id: Some(request_id.clone()),
                 silent: false,
+                images: Vec::new(),
                 cancel: Some(cancel_token.clone()),
             },
             cancel: cancel_token.clone(),
@@ -913,20 +919,6 @@ pub async fn generate_assist(
         .filter(|l| l.starts_with("["))
         .count();
 
-    // Resolve base system prompt: per-action config > active scenario > hardcoded template.
-    // Active scenario is set by the frontend at meeting start based on the selected AI scenario.
-    let base_system_prompt = action_cfg
-        .as_ref()
-        .map(|c| c.system_prompt.clone())
-        .unwrap_or_else(|| {
-            // Check if the active scenario has a system prompt set
-            let scenario_prompt = state.active_scenario.read().ok().and_then(|s| {
-                if s.system_prompt.is_empty() { None } else { Some(s.system_prompt.clone()) }
-            });
-            scenario_prompt.unwrap_or_else(|| {
-                crate::intelligence::prompt_templates::get_system_prompt(&mode).to_string()
-            })
-        });
 
     // Append composed instructions (tone + format + length + custom text) to system prompt.
     // These are behavioral directives that belong in the system context, not as reference materials.
@@ -962,10 +954,12 @@ pub async fn generate_assist(
     let params = GenerationParams {
         temperature: Some(temperature),
         max_tokens: None,
+        model_options: None,
         cache_name: active_cache_name.clone(),
         enable_web_search,
         request_id: Some(request_id),
         silent: false,
+        images: Vec::new(),
         cancel: Some(cancel_token.clone()),
     };
 

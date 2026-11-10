@@ -39,7 +39,12 @@ export async function resetMeetingScopedStores(): Promise<void> {
 
   // Transcript + live streaming AI response
   useTranscriptStore.getState().clearSegments();
-  useStreamStore.getState().resetForMeeting();
+  // Starting meeting audio must not discard a screen answer that is still arriving.
+  const stream = useStreamStore.getState();
+  const screenTaskRunning = (stream.currentMode === "ScreenTask" || stream.currentMode === "CodeReview") && (stream.isStreaming || stream.phase !== "idle");
+  if (!screenTaskRunning) {
+    stream.resetForMeeting();
+  }
 
   // Meeting artifacts / panels
   useDevLogStore.getState().clear();

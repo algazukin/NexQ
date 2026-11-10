@@ -1,3 +1,4 @@
+import { ScreenTaskButtons } from "../screen/ScreenTaskControls";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useConfigStore } from "../stores/configStore";
@@ -394,6 +395,7 @@ export function LauncherView() {
                 </div>
               </button>
 
+              <div className="mt-3"><ScreenTaskButtons showRepeat={false} /></div>
               {startError && (
                 <div className="mt-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
                   {startError}

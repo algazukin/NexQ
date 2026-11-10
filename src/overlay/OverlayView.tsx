@@ -1,3 +1,7 @@
+import { useInterviewHintMode } from "../hints/hintMode";
+import { HintOverlay } from "../hints/HintOverlay";
+import { ScreenTaskPreview } from "../screen/ScreenTaskControls";
+import { useScreenTaskStore } from "../screen/screenTaskStore";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useScenarioStore } from "../stores/scenarioStore";
@@ -21,7 +25,6 @@ import { useMeetingShortcuts } from "../hooks/useMeetingShortcuts";
 import { useConfigStore } from "../stores/configStore";
 import { useSpeakerDetection } from "../hooks/useSpeakerDetection";
 import { useTopicDetection } from "../hooks/useTopicDetection";
-import { useTranslation } from "../hooks/useTranslation";
 import { MODE_COLORS } from "../lib/speakerColors";
 import { showLauncherWindow } from "../lib/windows";
 import {
@@ -51,13 +54,19 @@ import { formatDuration } from "../lib/utils";
 
 // ════════════════════════════════════════════════════════════════
 export function OverlayView() {
+  const enabled = useInterviewHintMode();
+  return enabled ? <HintOverlay /> : <ClassicOverlayView />;
+}
+
+function ClassicOverlayView() {
   const activeMeeting = useMeetingStore((s) => s.activeMeeting);
   const elapsedMs = useMeetingStore((s) => s.elapsedMs);
   const recordingEnabled = useConfigStore((s) => s.recordingEnabled);
   const audioMode = useMeetingStore((s) => s.audioMode);
   const endMeetingFlow = useMeetingStore((s) => s.endMeetingFlow);
   const setCurrentView = useMeetingStore((s) => s.setCurrentView);
-  const scenarioTemplate = useScenarioStore((s) => s.getActiveTemplate());
+  const scenario = useMeetingStore((s) => s.activeMeeting?.ai_scenario ?? s.aiScenario);
+  const scenarioName = useScenarioStore((s) => s.getTemplate(scenario).name);
   const [askInputVisible, setAskInputVisible] = useState(false);
   const [devLogOpen, setDevLogOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -74,6 +83,8 @@ export function OverlayView() {
     setBookmarksOpen(false);
     setLayoutMode("split");
   }, [activeMeetingId]);
+  const screenCaptureId = useScreenTaskStore((s) => s.capture?.id);
+  useEffect(() => { if (screenCaptureId) setLayoutMode((mode) => mode === "transcript" ? "split" : mode); }, [screenCaptureId]);
   const cycleLayout = () => setLayoutMode((m) => m === "split" ? "ai" : m === "ai" ? "transcript" : "split");
   const toggleLog = useCallLogStore((s) => s.toggleOpen);
   const logOpen = useCallLogStore((s) => s.isOpen);
@@ -129,9 +140,6 @@ export function OverlayView() {
   // Live topic detection from backend events
   useTopicDetection();
 
-  // Translation event subscriptions + auto-translate trigger
-  useTranslation();
-
   const handleEndMeeting = useCallback(async () => {
     try { await endMeetingFlow(); showToast("Meeting ended", "info"); }
     catch (err) { showToast(err instanceof Error ? err.message : "Couldn't end meeting", "error"); }
@@ -167,11 +175,11 @@ export function OverlayView() {
 
       {/* ═══ HEADER ═══ */}
       <div
-        className="no-select flex items-center justify-between gap-3 px-4 py-2 cursor-move"
+        className="no-select flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3 py-2 cursor-move"
         data-tauri-drag-region
         style={{ borderBottom: "1px solid hsl(var(--border) / 0.12)" }}
       >
-        <div className="flex items-center gap-2.5" data-tauri-drag-region>
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1" data-tauri-drag-region>
           <GripHorizontal className="h-3 w-3 text-muted-foreground/40" />
           <span className="text-xs font-semibold text-foreground/90 truncate max-w-[160px]" title={meetingTitle}>
             {meetingTitle}
@@ -194,14 +202,14 @@ export function OverlayView() {
           </span>
           {/* Scenario chip */}
           <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded bg-white/5">
-            {scenarioTemplate.name}
+            {scenarioName}
           </span>
           <span className="text-xs text-muted-foreground/60 tabular-nums font-medium">
             {elapsedMs > 0 ? formatDuration(elapsedMs) : "00:00"}
           </span>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1">
           {/* Mute controls */}
           <button
             onClick={toggleMuteYou}
@@ -247,6 +255,7 @@ export function OverlayView() {
             tooltip={`${stealthMode ? "Hidden from screen share — click to show" : "Visible in screen share — click to hide"} (${formatShortcut(stealthShortcut)})`}
           />
           <HeaderBtn icon={<Eye className="h-3.5 w-3.5" />} onClick={cycleOpacity} tooltip={`Transparency: ${Math.round(overlayOpacity * 100)}% (click to cycle)`} />
+          {activeMeeting && scenario === "interview" && <button className="rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" onClick={() => useConfigStore.getState().setHintsEnabled(true)}>Подсказки</button>}
           <HeaderBtn icon={<Settings className="h-3.5 w-3.5" />} onClick={() => setCurrentView("settings")} tooltip="Settings" />
           <HeaderBtn icon={<Minus className="h-3.5 w-3.5" />} onClick={handleMinimizeToDashboard} tooltip="Minimize to Dashboard (Ctrl+B brings it back)" />
 
@@ -353,6 +362,7 @@ export function OverlayView() {
             <div className="flex shrink-0 items-center gap-1 border-b border-border/20 px-2.5 py-1.5">
               <ModeButtons />
             </div>
+            <ScreenTaskPreview />
             <div className="flex min-h-0 flex-1 flex-col p-3">
               <AIResponsePanel />
             </div>

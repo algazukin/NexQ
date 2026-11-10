@@ -21,7 +21,10 @@ describe("streamStore", () => {
   afterEach(() => vi.useRealTimers());
 
   it("walks the phases: sending → waiting → writing → idle, with timer fields", () => {
+    // Arrange
+    // Act
     s().setPending("FollowUp", "r1");
+    // Assert
     expect(s()).toMatchObject({ phase: "sending", requestStartedAt: T0, currentMode: "FollowUp", firstTokenAt: null });
 
     vi.setSystemTime(T0 + 400);
@@ -34,6 +37,7 @@ describe("streamStore", () => {
     expect(s().phase).toBe("waiting");
     expect(s().requestStartedAt).toBe(T0); // the click, not the start event
     expect(s().streamMeta).toEqual({
+      requestId: "r1",
       model: "haiku",
       provider: "Claude CLI",
       scopeLabel: "Last 5 min",

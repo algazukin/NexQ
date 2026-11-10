@@ -18,6 +18,29 @@ pub fn get_system_prompt(mode: &str) -> &'static str {
     }
 }
 
+/// Same programming-only role used by the frontend Interview scenario.
+pub const TECHNICAL_INTERVIEW_PROMPT: &str = include_str!("../../../src/lib/technicalInterviewInstructions.txt");
+
+/// The More action gives a usable interview solution, not a tutorial.
+/// Shared by spoken-question details and screenshot details.
+pub const INTERVIEW_DETAILS_PROMPT: &str = "\
+Answer the original interview question in its language, using C#/.NET by default. \
+For a coding task provide complete efficient C# code in this format only: \
+one short sentence with the idea, one code block containing the requested method \
+or class, then one line with time and space complexity. Implement the given contract. \
+Assume standard using directives are already provided: do not show them or fully \
+qualify standard library type names. Omit namespaces, new interfaces, demo programs, usage examples, \
+tests and extra abstractions unless the task requires them. Prefer roughly 15-35 \
+readable lines for a simple task; exceed that when correctness requires it. \
+Keep necessary synchronization, cancellation behavior and error handling. Use braces \
+and readable names; do not minify code to meet a line target. State at most one \
+important caveat without an extra section. For a conceptual C#/.NET question give \
+2-4 direct sentences and a tiny example only when useful. Keep prose outside code \
+under 80 words. Do not repeat the question, the short hint or the solution in a \
+second explanation. No headings, preamble, alternatives, brainstorming or verification \
+commentary. These More-mode formatting rules override generic detailed-response \
+presets. Use another programming language only when explicitly requested.";
+
 pub const ASSIST_PROMPT: &str = "\
 You are an AI meeting assistant. A question has been detected in the meeting. \
 Based on the transcript, uploaded documents, and available context, provide a clear, \

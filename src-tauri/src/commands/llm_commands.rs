@@ -62,6 +62,8 @@ pub async fn set_llm_provider(
         .set_provider(config)
         .map_err(|e| format!("Failed to set provider: {}", e))?;
 
+    drop(router);
+    invalidate_translation_cache(&state);
     log::info!("LLM provider set to: {}", provider);
     Ok(())
 }
@@ -104,6 +106,8 @@ pub async fn set_active_model(
         .map_err(|e| format!("Failed to lock LLM router: {}", e))?;
 
     router.set_active_model(model_id.clone());
+    drop(router);
+    invalidate_translation_cache(&state);
     log::info!("Active model set to: {}", model_id);
     Ok(())
 }
@@ -191,4 +195,30 @@ pub async fn list_openrouter_models(
     );
 
     serde_json::to_string(&models).map_err(|e| format!("Failed to serialize: {}", e))
+}
+
+#[command]
+pub async fn set_llm_profiles(
+    profiles: crate::llm::profiles::LlmProfiles,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    profiles.validate()?;
+    let router = state.llm.as_ref().ok_or("LLM router not initialized")?;
+    {
+        let mut router = router.lock().map_err(|_| "LLM lock poisoned")?;
+        if router.profiles == profiles {
+            return Ok(());
+        }
+        router.profiles = profiles;
+    }
+    invalidate_translation_cache(&state);
+    Ok(())
+}
+
+fn invalidate_translation_cache(state: &AppState) {
+    if let Some(translation) = state.translation.as_ref() {
+        if let Ok(mut router) = translation.lock() {
+            router.cache_mut().clear();
+        }
+    }
 }

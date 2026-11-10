@@ -1,3 +1,11 @@
+import { useModelProfilesStore } from "./stores/modelProfilesStore";
+import { isInterviewHintMode } from "./hints/hintMode";
+import { useHintAssistant } from "./hints/useHintAssistant";
+import { useHintWindow } from "./hints/useHintWindow";
+import { useScreenTaskStore } from "./screen/screenTaskStore";
+import { ScreenTaskOverlay } from "./screen/ScreenTaskOverlay";
+import { useScreenTask } from "./screen/useScreenTask";
+import { useScreenTaskShortcuts } from "./screen/useScreenTaskShortcuts";
 import { useEffect, useCallback, useState } from "react";
 import { useMeetingStore } from "./stores/meetingStore";
 import { useConfigStore } from "./stores/configStore";
@@ -30,6 +38,7 @@ import { SHOW_MEETING_OVERLAY_EVENT, showLauncherWindow, showMeetingOverlay, sho
 import { emitOverlayMeetingReady, onOverlayMeetingReady, onStartDetectedMeeting, onStealthModeChanged } from "./lib/events";
 
 function App() {
+  const [windowLabel, setWindowLabel] = useState<string>("");
   const currentView = useMeetingStore((s) => s.currentView);
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
   const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
@@ -45,13 +54,15 @@ function App() {
 
   // Wire up theme and global shortcuts
   useTheme();
-  useGlobalShortcut();
+  useGlobalShortcut(windowLabel);
+  useHintAssistant(windowLabel);
+  useHintWindow(windowLabel);
 
   // Demo mode keyboard shortcut (Ctrl+Shift+D)
   useDemoShortcut();
 
   // Translation event subscriptions (needed for SelectionToolbar in all views)
-  useTranslation();
+  useTranslation(windowLabel === "overlay");
 
   // Sync frontend state to system tray icon & menu
   useTraySync();
@@ -65,6 +76,7 @@ function App() {
   // Load persisted config from Tauri store on app start
   useEffect(() => {
     loadConfig();
+    useModelProfilesStore.getState().loadConfig();
     useAIActionsStore.getState().loadConfigs();
     useTranslationStore.getState().loadConfig().then(async () => {
       // Sync backend translation provider with persisted frontend setting
@@ -95,7 +107,8 @@ function App() {
   }, [loadRecentMeetings]);
 
   // Detect which Tauri window we're in ("launcher" or "overlay")
-  const [windowLabel, setWindowLabel] = useState<string>("");
+  useScreenTask(windowLabel);
+  useScreenTaskShortcuts(configLoaded ? windowLabel : "");
   useEffect(() => {
     import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
       const label = getCurrentWebviewWindow().label;
@@ -122,17 +135,17 @@ function App() {
 
   // OVERLAY window: show the meeting overlay on request (launcher RETURN,
   // Ctrl+B, tray "Show Overlay"). It renders only its own view, so switch to
-  // the meeting first; with no meeting running, show the launcher instead.
+  // the meeting or standalone screen answer first; otherwise show the launcher.
   useEffect(() => {
     if (windowLabel !== "overlay") return;
     const show = () => {
       const store = useMeetingStore.getState();
-      if (!store.activeMeeting) {
+      if (!store.activeMeeting && !useScreenTaskStore.getState().capture) {
         showLauncherWindow().catch(() => {});
         return;
       }
       if (store.currentView !== "overlay" && store.currentView !== "settings") store.setCurrentView("overlay");
-      showOverlayWindow().catch(() => {});
+      showOverlayWindow({ focus: !isInterviewHintMode() || store.currentView === "settings" || store.settingsOpen }).catch(() => {});
     };
     const unlisteners: Array<() => void> = [];
     listen(SHOW_MEETING_OVERLAY_EVENT, show).then((fn) => unlisteners.push(fn));
@@ -338,6 +351,7 @@ function App() {
     const loadingBg = windowLabel === "overlay" ? "bg-transparent" : "bg-background";
     return (
       <div className={`flex h-screen w-screen items-center justify-center ${loadingBg}`}>
+        <ActiveMeetingProvider key="meeting-hooks" isLauncherWindow={windowLabel !== "overlay"} />
         {windowLabel !== "overlay" && (
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -366,7 +380,7 @@ function App() {
                   state (open panels, tabs, layout mode) does not carry over */}
               <div key={activeMeetingId || "no-meeting"} className="flex h-full">
                 <div className="flex-1 min-w-0 overflow-hidden">
-                  <OverlayView />
+                  {activeMeetingId ? <OverlayView /> : <ScreenTaskOverlay />}
                 </div>
                 <CallLogPanel />
               </div>
@@ -376,7 +390,7 @@ function App() {
             <SettingsOverlay isModal={currentView === "overlay"} />
           )}
         </ErrorBoundary>
-        <ActiveMeetingProvider isLauncherWindow={false} />
+        <ActiveMeetingProvider key="meeting-hooks" isLauncherWindow={false} />
         <ToastContainer />
       </div>
     );
@@ -402,7 +416,7 @@ function App() {
         )}
         {settingsOpen && resolvedView === "overlay" && <SettingsOverlay isModal />}
       </ErrorBoundary>
-      <ActiveMeetingProvider isLauncherWindow={isLauncherWindow} />
+      <ActiveMeetingProvider key="meeting-hooks" isLauncherWindow={isLauncherWindow} />
       <ToastContainer />
       <SelectionToolbar />
       {/* Call log panel is now integrated into the overlay flex layout above */}

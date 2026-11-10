@@ -41,6 +41,9 @@ use commands::settings_commands;
 use commands::model_commands;
 // == MODULE COMMANDS: stealth ==
 use commands::stealth_commands;
+mod screen_capture;
+#[cfg(target_os = "windows")]
+mod window_blur;
 // == MODULE COMMANDS: gemini cache ==
 use commands::gemini_cache_commands;
 // == MODULE COMMANDS: rag ==
@@ -57,72 +60,6 @@ use commands::tray_commands;
 use commands::updater_commands;
 // == MODULE COMMANDS: claude cli ==
 use commands::claude_cli_commands;
-
-/// Enable live blur-behind on a window via the undocumented `SetWindowCompositionAttribute`
-/// (user32). `DwmEnableBlurBehindWindow` (used automatically by tao for `transparent: true`)
-/// is a no-op on Windows 10/11 — this is the API that still works, and (unlike the old
-/// Aero blur) composites the live desktop/other windows behind, not just the wallpaper.
-/// Gradient color alpha is 0, so it adds no tint of its own; the overlay's own CSS
-/// (`.overlay-bg`) provides the adjustable dark tint on top.
-#[cfg(target_os = "windows")]
-fn enable_live_blur_behind(hwnd_raw: *mut std::ffi::c_void) {
-    use std::ffi::c_void;
-    use windows::core::PCSTR;
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
-
-    #[repr(C)]
-    struct AccentPolicy {
-        accent_state: u32,
-        accent_flags: u32,
-        gradient_color: u32,
-        animation_id: u32,
-    }
-
-    #[repr(C)]
-    struct WindowCompositionAttribData {
-        attrib: u32,
-        pv_data: *mut c_void,
-        cb_data: usize,
-    }
-
-    const WCA_ACCENT_POLICY: u32 = 19;
-    const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
-
-    // Undocumented API: not present in user32.lib's import table, so it must be
-    // resolved at runtime via GetProcAddress instead of statically linked.
-    type SetWindowCompositionAttributeFn =
-        unsafe extern "system" fn(HWND, *mut WindowCompositionAttribData) -> i32;
-
-    unsafe {
-        let Ok(module) = GetModuleHandleA(PCSTR(b"user32.dll\0".as_ptr())) else {
-            return;
-        };
-        let Some(proc) = GetProcAddress(module, PCSTR(b"SetWindowCompositionAttribute\0".as_ptr()))
-        else {
-            return;
-        };
-        let set_window_composition_attribute: SetWindowCompositionAttributeFn =
-            std::mem::transmute(proc);
-
-        let mut policy = AccentPolicy {
-            accent_state: ACCENT_ENABLE_BLURBEHIND,
-            accent_flags: 0,
-            // ABGR. Alpha must be non-zero or DWM treats blur-behind as disabled
-            // and the window falls back to opaque. Alpha=1 is visually negligible.
-            gradient_color: 0x01000000,
-            animation_id: 0,
-        };
-
-        let mut data = WindowCompositionAttribData {
-            attrib: WCA_ACCENT_POLICY,
-            pv_data: &mut policy as *mut _ as *mut c_void,
-            cb_data: std::mem::size_of::<AccentPolicy>(),
-        };
-
-        set_window_composition_attribute(HWND(hwnd_raw), &mut data);
-    }
-}
 
 /// Show the launcher window and hide the overlay window.
 fn show_launcher(app: &tauri::AppHandle) {
@@ -175,6 +112,32 @@ fn hide_all(app: &tauri::AppHandle) {
     }
 }
 
+/// Hide both persistent windows without stopping capture/transcription; restore through the existing view routing.
+#[tauri::command]
+fn toggle_tray_visibility(
+    app_handle: tauri::AppHandle,
+    capture_state: tauri::State<'_, screen_capture::ScreenCaptureState>,
+) -> Result<(), String> {
+    if capture_state.is_capturing() {
+        return Err("Finish or cancel screen capture before hiding NexQ".into());
+    }
+    let windows: Vec<_> = ["launcher", "overlay"].iter()
+        .filter_map(|label| app_handle.get_webview_window(label)).collect();
+    let shown = windows.iter().any(|window| window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false));
+    if shown {
+        for window in windows {
+            window.hide().map_err(|error| format!("Could not hide {}: {error}", window.label()))?;
+        }
+        #[cfg(target_os = "windows")]
+        unsafe {
+            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+        }
+    } else {
+        app_handle.emit("tray_show_overlay", ()).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Relaunched by the installer of an update installed on quit: the user
@@ -191,6 +154,7 @@ pub fn run() {
     ).init();
 
     tauri::Builder::default()
+        .manage(screen_capture::ScreenCaptureState::default())
         // Must be first: a second launch forwards to this process and exits,
         // preventing duplicate tray icons.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -552,23 +516,23 @@ pub fn run() {
             // -- Stealth mode saved on: hide windows from capture before the webviews load --
             stealth_commands::restore_on_startup(app.handle());
 
-            // -- Intercept launcher window close: hide instead of quit --
-            if let Some(launcher) = app.get_webview_window("launcher") {
-                let close_app = app.handle().clone();
-                launcher.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        hide_all(&close_app);
-                    }
-                });
+            // Both windows stay alive in the tray so RETURN can always restore the overlay.
+            for label in ["launcher", "overlay"] {
+                if let Some(window) = app.get_webview_window(label) {
+                    let close_app = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            hide_all(&close_app);
+                        }
+                    });
+                }
             }
 
-            // -- Enable live blur-behind on the overlay window for real desktop passthrough --
+            // Remove desktop blur before hiding and restore it only after showing.
             #[cfg(target_os = "windows")]
             if let Some(overlay) = app.get_webview_window("overlay") {
-                if let Ok(hwnd) = overlay.hwnd() {
-                    enable_live_blur_behind(hwnd.0);
-                }
+                window_blur::follow_visibility(&overlay);
             }
 
             log::info!("NexQ initialized successfully");
@@ -605,6 +569,7 @@ pub fn run() {
             stt_commands::get_pause_threshold,
             // == COMMANDS: llm ==
             llm_commands::set_llm_provider,
+            llm_commands::set_llm_profiles,
             llm_commands::list_models,
             llm_commands::set_active_model,
             llm_commands::test_llm_connection,
@@ -612,6 +577,14 @@ pub fn run() {
             llm_commands::list_openrouter_models,
             // == COMMANDS: intelligence ==
             intelligence_commands::generate_assist,
+            toggle_tray_visibility,
+            screen_capture::capture_screen_task,
+            screen_capture::start_screen_capture,
+            screen_capture::get_screen_capture,
+            screen_capture::finish_screen_capture,
+            screen_capture::cancel_screen_capture,
+            screen_capture::recapture_screen_region,
+            commands::screen_task_commands::generate_screen_task,
             intelligence_commands::cancel_generation,
             intelligence_commands::set_auto_trigger,
             intelligence_commands::set_context_window_seconds,
@@ -723,6 +696,9 @@ pub fn run() {
             updater_commands::get_pending_update,
             updater_commands::is_quit_pending,
             // == COMMANDS: claude cli ==
+            commands::codex_cli_commands::codex_cli_status,
+            commands::codex_cli_commands::codex_cli_models,
+            commands::codex_cli_commands::open_codex_login_terminal,
             claude_cli_commands::claude_cli_status,
             claude_cli_commands::set_claude_cli_config,
             claude_cli_commands::claude_cli_models,

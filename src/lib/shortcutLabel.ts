@@ -53,7 +53,7 @@ export function acceleratorFromEvent(
   let key: string;
   if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
   else if (/^Digit[0-9]$/.test(e.code)) key = e.code.slice(5);
-  else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.code)) key = e.code;
+  else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.code) || e.code === "Enter") key = e.code;
   else return null;
   parts.push(key);
   return parts.join("+");
@@ -83,9 +83,11 @@ export function normalizeAccelerator(accelerator: string, mac = isMacPlatform())
   const mods = new Set<string>();
   let key = "";
   for (const raw of accelerator.split("+").filter(Boolean)) {
-    let mod = MODIFIER_ALIASES[raw.toLowerCase()];
+    const lower = raw.toLowerCase();
+    let mod = MODIFIER_ALIASES[lower];
     if (mod === (mac ? "Super" : "Ctrl")) mod = "CmdOrCtrl";
     if (mod) mods.add(mod);
+    else if (lower === "enter" || lower === "return") key = "Enter";
     else key = raw.length === 1 ? raw.toUpperCase() : raw;
   }
   return [...MODIFIER_ORDER.filter((m) => mods.has(m)), key].join("+");
@@ -98,9 +100,12 @@ export function normalizeAccelerator(accelerator: string, mac = isMacPlatform())
 export const RESERVED_SHORTCUTS: Record<string, string> = {
   "CmdOrCtrl+M": "Start / end meeting",
   "CmdOrCtrl+B": "Show / hide overlay",
+  "CmdOrCtrl+Alt+B": "Hide / restore NexQ in tray",
   "CmdOrCtrl+,": "Open settings",
   "CmdOrCtrl+Shift+L": "Dev log",
   "CmdOrCtrl+Shift+D": "Demo mode",
+  "CmdOrCtrl+Alt+S": "Capture screen task",
+  "CmdOrCtrl+Shift+Enter": "Repeat last screen region",
 };
 
 /** The action that already owns `accelerator`, if any. */

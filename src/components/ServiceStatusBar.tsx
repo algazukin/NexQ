@@ -33,6 +33,7 @@ const LLM_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
   custom: "Custom",
   claude_cli: "Claude",
+  codex_cli: "Codex",
 };
 
 const STT_LABELS: Record<string, string> = {
@@ -949,6 +950,8 @@ function LLMPickerDropdown({
     if (!useAgentStore.getState().status) refreshClaudeStatus();
   }, [refreshClaudeStatus]);
   const claudeAvailable = currentProvider === "claude_cli" || !!claudeStatus?.auth?.logged_in;
+  const rememberedCodexModel = useConfigStore((state) => state.lastModelByProvider.codex_cli);
+  const codexAvailable = currentProvider === "codex_cli" || !!rememberedCodexModel;
 
   // Internal state: pending provider (may differ from active while browsing)
   const [pendingProvider, setPendingProvider] = useState(currentProvider);
@@ -1078,13 +1081,21 @@ function LLMPickerDropdown({
         </div>
       )}
 
-      {claudeAvailable && (
+      {(claudeAvailable || codexAvailable) && (
         <div className={available.length > 0 ? "border-t border-border/20" : ""}>
           <div className="flex items-center gap-1.5 bg-muted/20 px-3 py-1.5 border-b border-border/20">
             <Cpu className="h-2.5 w-2.5 text-muted-foreground" />
             <span className="text-meta font-semibold uppercase tracking-wider text-muted-foreground/70">Subscription</span>
           </div>
-          <button
+          {codexAvailable && <button
+            onClick={() => setPendingProvider("codex_cli")}
+            className={`flex w-full items-center gap-2.5 px-3 py-2 text-xs transition-colors ${pendingProvider === "codex_cli" ? "bg-primary/10 text-primary" : "text-foreground/80 hover:bg-accent/40"}`}
+          >
+            <Brain className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1 text-left font-medium">Codex</span>
+            {currentProvider === "codex_cli" && <span className="text-meta text-primary/80">active</span>}
+          </button>}
+          {claudeAvailable && <button
             onClick={() => setPendingProvider("claude_cli")}
             className={`flex w-full items-center gap-2.5 px-3 py-2 text-xs transition-colors cursor-pointer ${
               pendingProvider === "claude_cli" ? "bg-primary/10 text-primary" : "text-foreground/80 hover:bg-accent/40"
@@ -1093,11 +1104,11 @@ function LLMPickerDropdown({
             <Brain className={`h-3.5 w-3.5 shrink-0 ${pendingProvider === "claude_cli" ? "text-primary" : "text-muted-foreground"}`} />
             <span className="flex-1 text-left font-medium">Claude</span>
             {currentProvider === "claude_cli" && <span className="text-meta text-primary/80">active</span>}
-          </button>
+          </button>}
         </div>
       )}
 
-      {available.length === 0 && !claudeAvailable && (
+      {available.length === 0 && !claudeAvailable && !codexAvailable && (
         <div className="px-4 py-3 text-meta text-muted-foreground/60">
           No verified providers — test connection in Settings first
         </div>

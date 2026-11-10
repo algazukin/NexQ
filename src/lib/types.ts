@@ -220,7 +220,11 @@ export type IntelligenceMode =
   | "MeetingSummary"
   | "ActionItemsExtraction"
   | "BookmarkSuggestions"
-  | "MeetingAsk";
+  | "MeetingAsk"
+  | "CodeReview"
+  | "ScreenTask"
+  | "Hint"
+  | "HintDetails";
 
 export interface StreamSource {
   title: string;
@@ -250,6 +254,8 @@ export interface ModelInfo {
   name: string;
   provider: string;
   context_window: number | null;
+  supported_reasoning_efforts?: string[];
+  input_modalities?: string[];
 }
 
 // == OPENROUTER ENRICHED MODEL ==
@@ -299,7 +305,8 @@ export type LLMProviderType =
   | "gemini"
   | "openrouter"
   | "custom"
-  | "claude_cli";
+  | "claude_cli"
+  | "codex_cli";
 
 /** Auth mode for a user-supplied (custom) LLM endpoint. */
 export type CustomLlmAuthType = "none" | "bearer" | "api_key";
@@ -607,6 +614,8 @@ export interface AppConfig {
 }
 
 export interface HotkeyConfig {
+  hint_now?: string;
+  hint_details?: string;
   toggle_assist: string;
   start_end_meeting: string;
   show_hide: string;
@@ -1098,4 +1107,19 @@ export interface OverlayMeetingReadyEvent {
 /** Frontend-only event: a window finished `endMeetingFlow`. */
 export interface WindowMeetingEndedEvent {
   window: string;
+}
+
+export interface CodexCliStatus {
+  installed: boolean;
+  authenticated: boolean;
+  auth_type: string | null;
+  plan: string | null;
+  version: string | null;
+  binary_path: string | null;
+  error: string | null;
+}
+export interface CodexModelInfo extends ModelInfo {
+  supported_reasoning_efforts: string[];
+  input_modalities: string[];
+  is_default: boolean;
 }

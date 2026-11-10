@@ -15,8 +15,13 @@ These shortcuts are registered system-wide and work regardless of which applicat
 | Shortcut | Action | Description |
 |----------|--------|-------------|
 | `Ctrl+M` | Start / End Meeting | Starts a new meeting if none is active; ends the current meeting if one is running |
-| `Ctrl+B` | Toggle Overlay | Switches between the launcher (dashboard) and the overlay (meeting) window. Only works when a meeting is active |
+| `Ctrl+B` | Toggle Overlay | Switches between the launcher (dashboard) and the overlay (meeting) window. Works during a meeting or when a captured screen answer is held in memory |
 | `Ctrl+,` | Open / Close Settings | Toggles the settings panel |
+| `Ctrl+Alt+S` | Capture screen task | Find and answer the main task on the active display, without selecting an area (Windows) |
+| `Ctrl+Shift+Enter` | Repeat last area | Capture the last manual area, or the active display when none is selected (Windows) |
+| `Ctrl+Alt+B` | Hide / restore in tray | Hide both windows while recording continues; press again to restore |
+
+The two screen-task shortcuts are fixed and reserved. See [Screen tasks](screen-tasks.md) for provider setup and capture behavior.
 
 ## Meeting Shortcuts
 

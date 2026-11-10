@@ -88,14 +88,14 @@ pub async fn translate_text(
     let source = source_lang.filter(|s| !s.is_empty() && s != "auto");
 
     // Check cache first, then clone Arc<dyn Provider> BEFORE dropping lock
-    let (cached_result, provider_arc, provider_name) = {
+    let (cached_result, provider_arc, provider_name, cache_generation) = {
         let router = trans_arc.lock().map_err(|_| "Lock poisoned")?;
         if let Some(cached) = router.cache().get(&text, &target) {
-            (Some(cached.to_string()), None, router.active_provider_name())
+            (Some(cached.to_string()), None, router.active_provider_name(), router.cache().generation())
         } else {
             let p = router.get_provider().map_err(|e| e.to_string())?;
             let name = p.provider_name().to_string();
-            (None, Some(p), name)
+            (None, Some(p), name, router.cache().generation())
         }
         // Lock dropped here — safe to .await below
     };
@@ -163,7 +163,9 @@ pub async fn translate_text(
     // Cache the result
     {
         let mut router = trans_arc.lock().map_err(|_| "Lock poisoned")?;
-        router.cache_mut().insert(&text, &target, translated.clone());
+        if router.cache().generation() == cache_generation {
+            router.cache_mut().insert(&text, &target, translated.clone());
+        }
     }
 
     Ok(TranslationResult {
@@ -184,10 +186,12 @@ pub async fn translate_segments(
     meeting_id: String,
     target_lang: Option<String>,
     source_lang: Option<String>,
+    incremental: Option<bool>,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
     let target = target_lang.ok_or("target_lang is required")?;
     let source = source_lang.as_deref();
+    let source_name = source.unwrap_or("auto");
 
     let trans_arc = state.translation.as_ref()
         .ok_or("Translation router not initialized")?;
@@ -202,35 +206,66 @@ pub async fn translate_segments(
     };
 
     for (seg_id, text) in segment_ids.iter().zip(texts.iter()) {
-        let translated = if is_llm {
-            translate_via_llm(&app, text, source, &target).await?
+        let previous = if incremental == Some(true) {
+            state.database.as_ref()
+                .and_then(|db_arc| {
+                    let db = db_arc.lock().ok()?;
+                    crate::db::translation::get_segment_translation(db.connection(), seg_id, &target)
+                        .ok().flatten()
+                })
+                .filter(|row| row.meeting_id == meeting_id
+                    && row.source_lang == source_name && row.provider == provider_name)
         } else {
-            provider_arc.translate(text, source, &target).await
-                .map_err(|e| e.to_string())?
+            None
         };
 
-        // Save to DB
-        if let Some(ref db_arc) = state.database {
-            if let Ok(db) = db_arc.lock() {
-                let _ = crate::db::translation::save_translation(
-                    db.connection(),
-                    seg_id,
-                    &meeting_id,
-                    source.unwrap_or("auto"),
-                    &target,
-                    text,
-                    &translated,
-                    &provider_name,
-                );
+        let continuation = previous.as_ref().and_then(|row| {
+            live_translation_delta(text, &row.original_text)
+                .map(|delta| (delta, row.translated_text.as_str()))
+        });
+        let translated = match continuation {
+            Some(("", prefix)) => prefix.to_string(),
+            continuation => {
+                let (input, prefix) = continuation.unwrap_or((text, ""));
+                let fragment = if is_llm {
+                    translate_via_llm(&app, input, source, &target).await?
+                } else {
+                    provider_arc.translate(input, source, &target).await
+                        .map_err(|e| e.to_string())?
+                };
+                let translated = if prefix.is_empty() {
+                    fragment
+                } else if fragment.is_empty() {
+                    prefix.to_string()
+                } else {
+                    format!("{prefix} {fragment}")
+                };
+
+                if let Some(ref db_arc) = state.database {
+                    if let Ok(db) = db_arc.lock() {
+                        let _ = crate::db::translation::save_translation(
+                            db.connection(),
+                            seg_id,
+                            &meeting_id,
+                            source_name,
+                            &target,
+                            text,
+                            &translated,
+                            &provider_name,
+                        );
+                    }
+                }
+
+                translated
             }
-        }
+        };
 
         // Emit result event
         let result = TranslationResult {
             segment_id: Some(seg_id.clone()),
             original_text: text.clone(),
             translated_text: translated,
-            source_lang: source.as_deref().unwrap_or("auto").to_string(),
+            source_lang: source_name.to_string(),
             target_lang: target.clone(),
             provider: provider_name.clone(),
         };
@@ -238,6 +273,38 @@ pub async fn translate_segments(
     }
 
     Ok(())
+}
+
+// The speech accumulator adds new final phrases with a single separating space.
+// Identical snapshots need no provider call; corrections need a fresh translation.
+fn live_translation_delta<'a>(text: &'a str, previous: &str) -> Option<&'a str> {
+    if text == previous {
+        return Some("");
+    }
+    text.strip_prefix(previous)?.strip_prefix(' ')
+}
+
+#[cfg(test)]
+mod live_translation_tests {
+    use super::live_translation_delta;
+
+    #[test]
+    fn reuses_exact_replays_and_translates_only_appended_phrases() {
+        // Arrange
+        let previous = "Use a lock.";
+
+        // Act
+        let replay = live_translation_delta(previous, previous);
+        let appended = live_translation_delta("Use a lock. Release it quickly.", previous);
+        let corrected = live_translation_delta("Use a semaphore instead.", previous);
+        let changed_word = live_translation_delta("Use a locker.", "Use a lock");
+
+        // Assert
+        assert_eq!(replay, Some(""));
+        assert_eq!(appended, Some("Release it quickly."));
+        assert_eq!(corrected, None);
+        assert_eq!(changed_word, None);
+    }
 }
 
 #[command]
@@ -493,14 +560,19 @@ async fn translate_via_llm(
         content: prompt,
     }];
 
-    let provider_arc = {
-        let router = llm_arc.lock().map_err(|_| "LLM lock poisoned")?;
-        router.get_provider().map_err(|e| format!("LLM not configured: {}", e))?
-    };
-
-    let model = {
-        let router = llm_arc.lock().map_err(|_| "LLM lock poisoned")?;
-        router.active_model().to_string()
+    let (provider_arc, model, options) = {
+        let mut router = llm_arc.lock().map_err(|_| "LLM lock poisoned")?;
+        let profile = router.profiles.translation.clone();
+        let provider_type = router.active_provider_type().map(|kind| kind.as_str()).unwrap_or("");
+        if profile.enabled && provider_type == "claude_cli" {
+            return Err("Claude CLI uses its Fast model. Disable the separate translation profile or select another provider.".into());
+        }
+        if profile.enabled && profile.options != Default::default() && !["custom", "openai", "codex_cli"].contains(&provider_type) {
+            return Err("Separate reasoning/boost settings are unavailable for this provider. Use Provider default.".into());
+        }
+        let model = if profile.enabled { profile.model } else { router.active_model().to_string() };
+        let options = if profile.enabled { profile.options } else { router.profiles.main.clone() };
+        (router.translation_provider().map_err(|error| error.to_string())?, model, options)
     };
 
     // Collect this request's tokens through a private sink
@@ -515,6 +587,7 @@ async fn translate_via_llm(
     let params = crate::llm::provider::GenerationParams {
         request_id: Some(uuid::Uuid::new_v4().to_string()),
         silent: true,
+        model_options: Some(options),
         ..Default::default()
     };
     let provider = provider_arc.lock().await;

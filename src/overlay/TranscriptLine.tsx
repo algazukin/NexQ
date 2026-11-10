@@ -6,7 +6,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Bookmark as BookmarkIcon } from "lucide-react";
-import type { TranscriptSegment } from "../lib/types";
+import type { MergedSegment } from "../lib/mergeSegments";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useSpeakerStore } from "../stores/speakerStore";
 import { useConfigStore } from "../stores/configStore";
@@ -21,7 +21,7 @@ import { defaultRemoteSpeakerName, remoteKeyOf, remoteSpeakerColor } from "../li
 let dismissActiveTooltip: (() => void) | null = null;
 
 interface TranscriptLineProps {
-  segment: TranscriptSegment;
+  segment: MergedSegment;
   /** Optional search query to highlight matches */
   searchQuery?: string;
 }
@@ -51,7 +51,7 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
   const translations = useTranslationStore((s) => s.translations);
   const translating = useTranslationStore((s) => s.translating);
   const displayMode = useTranslationStore((s) => s.displayMode);
-  const autoTranslateActive = useTranslationStore((s) => s.autoTranslateActive);
+  const targetLang = useTranslationStore((s) => s.targetLang);
 
   // SP2 Task 7: Bookmark state + context menu position
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -59,9 +59,14 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
   const isBookmarked = !!bookmark;
   const toggleBookmark = useBookmarkStore((s) => s.toggleBookmark);
 
-  // Translation for this segment
-  const translation = translations.get(segment.id);
-  const isTranslating = translating.has(segment.id);
+  // A displayed line can contain several independently translated segments.
+  const translatedParts = segment.originalIds.flatMap((id) => {
+    const result = translations.get(id);
+    return result?.target_lang === targetLang ? [result] : [];
+  });
+  const translation = translatedParts[0];
+  const translatedText = translatedParts.map((part) => part.translated_text).join(" ");
+  const isTranslating = segment.originalIds.some((id) => translating.has(id));
 
   // Resolve speaker ID — prefer explicit speaker_id, fall back to speaker field
   const baseSpeakerId = segment.speaker_id ?? (segment.speaker === "User" ? "you" : "them");
@@ -322,11 +327,9 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
         {/* Inline translation — visible below the original text */}
         {displayMode === "inline" && (
           <div className="mt-1 leading-[1.5]" style={{ fontSize: `${translationFontSize}px`, color: translationTextColor }}>
-            {isTranslating ? (
+            {translatedText || (isTranslating && (
               <span className="text-muted-foreground/40 animate-pulse">Translating...</span>
-            ) : translation ? (
-              translation.translated_text
-            ) : null}
+            ))}
           </div>
         )}
 
@@ -341,14 +344,14 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
             }}
           >
             <p style={{ fontSize: `${translationFontSize + 1}px`, color: translationTextColor }} className="leading-[1.6]">
-              {translation.translated_text}
+              {translatedText}
             </p>
             <div className="mt-1.5 flex items-center gap-1.5 text-[0.6rem] text-muted-foreground/50">
               <span className="rounded bg-white/8 px-1.5 py-0.5 font-medium tracking-wider">
                 {translation.source_lang.toUpperCase()} → {translation.target_lang.toUpperCase()}
               </span>
               <span>·</span>
-              <span>{translation.provider}</span>
+              <span>{[...new Set(translatedParts.map((part) => part.provider))].join(", ")}</span>
             </div>
           </div>,
           document.body

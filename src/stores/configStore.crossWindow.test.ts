@@ -167,3 +167,40 @@ describe("configStore: stealth mode and the custom endpoint across windows", () 
     });
   });
 });
+
+
+describe("hint settings across windows", () => {
+  beforeEach(() => {
+    saved.clear();
+    keyListeners.length = 0;
+    saved.set("llmProvider", "ollama");
+    saved.set("llmModel", "llama3.2");
+  });
+
+  it("syncs the display mode and configurable hint shortcuts", async () => {
+    // Arrange
+    const launcher = await openWindow();
+    const overlay = await openWindow();
+    // Act
+    overlay.getState().setHintsEnabled(false);
+    overlay.getState().setHotkeys({ ...overlay.getState().hotkeys, hint_now: "Ctrl+Alt+H" });
+    // Assert
+    await vi.waitFor(() => expect(launcher.getState().hintsEnabled).toBe(false));
+    await vi.waitFor(() => expect(launcher.getState().hotkeys.hint_now).toBe("Ctrl+Alt+H"));
+  });
+
+  it("syncs automatic answer preferences between the launcher and overlay", async () => {
+    // Arrange
+    vi.resetModules();
+    const first = (await import("./aiActionsStore")).useAIActionsStore;
+    saved.set("ai_action_configs", structuredClone(first.getState().configs));
+    await first.getState().loadConfigs();
+    vi.resetModules();
+    const second = (await import("./aiActionsStore")).useAIActionsStore;
+    await second.getState().loadConfigs();
+    // Act
+    first.getState().updateGlobalDefaults({ autoTrigger: false });
+    // Assert
+    await vi.waitFor(() => expect(second.getState().configs.globalDefaults.autoTrigger).toBe(false));
+  });
+});

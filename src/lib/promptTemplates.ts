@@ -6,6 +6,10 @@ import type { IntelligenceMode } from "./types";
 import { useAIActionsStore } from "../stores/aiActionsStore";
 
 const DEFAULT_PROMPTS: Record<IntelligenceMode, string> = {
+  Hint: "Give one main statement and up to two short points, no more than 50 words. Use C#/.NET by default.",
+  HintDetails: "Expand the displayed hint with a relevant C#/.NET example. For a task give complete efficient C# code.",
+  CodeReview: "Review visible code and annotate problematic source lines with concise comments.",
+  ScreenTask: "Solve the task shown in the screenshot. Give a direct, accurate answer.",
   Assist:
     "You are an AI meeting assistant. Based on the meeting transcript and context, " +
     "provide a helpful, concise response to the most recent question or topic. " +
