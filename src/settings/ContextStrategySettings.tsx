@@ -357,6 +357,7 @@ function formatBytes(bytes: number): string {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export function ContextStrategySettings() {
+  const configLoaded = useConfigStore((s) => s._loaded);
   const contextStrategy = useConfigStore((s) => s.contextStrategy);
   const setContextStrategy = useConfigStore((s) => s.setContextStrategy);
 
@@ -388,10 +389,20 @@ export function ContextStrategySettings() {
   useRagEvents();
 
   useEffect(() => {
+    if (!configLoaded) {
+      return;
+    }
     loadRagConfig();
     refreshIndexStatus();
-    checkOllamaStatus();
-  }, [loadRagConfig, refreshIndexStatus, checkOllamaStatus]);
+  }, [configLoaded, loadRagConfig, refreshIndexStatus]);
+
+  // Ollama embeddings are an optional document-search dependency, independent
+  // of the answer provider. Background status belongs in this panel, not a toast.
+  useEffect(() => {
+    if (configLoaded && contextStrategy === "local_rag") {
+      checkOllamaStatus({ notify: false });
+    }
+  }, [configLoaded, contextStrategy, checkOllamaStatus]);
 
   useEffect(() => {
     if (ragConfig) {
@@ -588,7 +599,7 @@ export function ContextStrategySettings() {
           {/* ── Connection ── */}
           <div className="rounded-xl border border-border/30 bg-card/50 p-5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-primary/80">Connection</h3>
+              <h3 className="text-sm font-semibold text-primary/80">Document search connection</h3>
             </div>
             <div className="space-y-4">
               {/* Ollama status */}
@@ -654,7 +665,7 @@ export function ContextStrategySettings() {
               {/* Buttons */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={checkOllamaStatus}
+                  onClick={() => checkOllamaStatus()}
                   disabled={isCheckingConnection}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >

@@ -67,7 +67,7 @@ interface RagState {
   saveRagConfig: (config: RagConfig) => Promise<void>;
   saveRagConfigWithStaleCheck: (config: RagConfig, prevConfig: RagConfig) => Promise<void>;
   refreshIndexStatus: () => Promise<void>;
-  checkOllamaStatus: () => Promise<void>;
+  checkOllamaStatus: (options?: { notify?: boolean }) => Promise<void>;
   rebuildIndex: () => Promise<void>;
   clearIndex: () => Promise<void>;
   pullModel: (model: string) => Promise<void>;
@@ -155,18 +155,18 @@ export const useRagStore = create<RagState>((set) => ({
     }
   },
 
-  checkOllamaStatus: async () => {
+  checkOllamaStatus: async ({ notify = true } = {}) => {
     set({ isCheckingConnection: true });
     try {
       const status = await testOllamaEmbeddingConnection();
       set({ ollamaStatus: status, error: null, isCheckingConnection: false });
-      if (status.connected) {
+      if (notify && status.connected) {
         showToast(
-          `Ollama connected — ${status.models.length} model${status.models.length !== 1 ? "s" : ""} available`,
+          `Document search: Ollama connected — ${status.models.length} model${status.models.length !== 1 ? "s" : ""} available`,
           "success"
         );
-      } else {
-        showToast("Ollama is not reachable", "error");
+      } else if (notify) {
+        showToast("Document search: Ollama is not reachable", "error");
       }
     } catch (e) {
       set({
@@ -174,7 +174,9 @@ export const useRagStore = create<RagState>((set) => ({
         error: e instanceof Error ? e.message : String(e),
         isCheckingConnection: false,
       });
-      showToast("Failed to connect to Ollama", "error");
+      if (notify) {
+        showToast("Document search: failed to connect to Ollama", "error");
+      }
     }
   },
 
@@ -220,7 +222,7 @@ export const useRagStore = create<RagState>((set) => ({
       showToast(`Model "${model}" pulled successfully`, "success");
       set({ isPullingModel: false, pullProgress: null });
       // Refresh connection status to reflect newly available model
-      useRagStore.getState().checkOllamaStatus();
+      useRagStore.getState().checkOllamaStatus({ notify: false });
     } catch (e) {
       console.error("[ragStore] Failed to pull model:", e);
       const msg = e instanceof Error ? e.message : String(e);
